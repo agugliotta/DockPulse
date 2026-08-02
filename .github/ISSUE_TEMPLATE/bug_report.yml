@@ -1,0 +1,46 @@
+name: Bug report
+description: Reportar un comportamiento incorrecto o una regresión.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        No incluyas tokens, secretos, variables de entorno completas ni logs sin redactar.
+  - type: textarea
+    id: description
+    attributes:
+      label: Descripción
+      description: ¿Qué ocurrió y qué esperabas que ocurriera?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Pasos para reproducir
+      placeholder: |
+        1. Desplegar...
+        2. Ejecutar...
+        3. Observar...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Entorno
+      description: Versión o commit de DockPulse, distribución Linux, Docker y tipo de despliegue.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs y evidencia redactados
+      description: Incluye correlation ID y job ID cuando existan.
+      render: shell
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Seguridad
+      options:
+        - label: Verifiqué que este reporte no contiene secretos ni datos sensibles.
+          required: true

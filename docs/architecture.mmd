@@ -1,0 +1,30 @@
+flowchart TB
+    Operator["Operador"]
+
+    subgraph ServerLXC["LXC Linux - DockPulse Server"]
+        direction LR
+        Web["DockPulse Web"]
+        Control["dockpulse-control - API y jobs"]
+        SQLite[("SQLite - inventario y auditoría")]
+        Web --> Control --> SQLite
+    end
+
+    subgraph AgentLXC1["LXC Linux - Docker Host 101"]
+        direction LR
+        Agent1["dockpulse-agent"]
+        Docker1["Docker daemon local"]
+        Workloads1["Contenedores y stacks"]
+        Agent1 -->|"socket local"| Docker1 --> Workloads1
+    end
+
+    subgraph AgentLXC2["LXC Linux - Docker Host 102"]
+        direction LR
+        Agent2["dockpulse-agent"]
+        Docker2["Docker daemon local"]
+        Workloads2["Contenedores y stacks"]
+        Agent2 -->|"socket local"| Docker2 --> Workloads2
+    end
+
+    Operator -->|"HTTPS"| Web
+    Control <-->|"API HMAC: inventario, eventos y acciones"| Agent1
+    Control <-->|"API HMAC: inventario, eventos y acciones"| Agent2

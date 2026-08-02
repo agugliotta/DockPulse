@@ -1,0 +1,12 @@
+.env
+.cache/
+*.db
+*.db-shm
+*.db-wal
+bin/
+web/node_modules/
+web/build/
+web/.svelte-kit/
+web/test-results/
+web/playwright-report/
+.DS_Store

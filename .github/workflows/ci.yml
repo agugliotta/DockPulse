@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Test with race detector
+        run: go test -race ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build binaries
+        run: go build ./cmd/...
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Check formatting
+        run: npm run format:check
+      - name: Type and Svelte checks
+        run: npm run check
+      - name: Build
+        run: npm run build
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: Critical UI flow
+        run: npm run test:e2e
+
+  deployment:
+    name: Deployment artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate all-in-one Compose
+        run: docker compose --env-file .env.example config --quiet
+      - name: Validate Server Compose
+        run: docker compose --env-file deploy/control.env.example -f deploy/docker-compose.control.yml config --quiet
+      - name: Validate Agent Compose
+        run: docker compose --env-file deploy/agent.env.example -f deploy/docker-compose.agent.yml config --quiet
+      - name: Build control image
+        run: docker build --file Dockerfile.control --tag dockpulse-control:ci .
+      - name: Build agent image
+        run: docker build --file Dockerfile.agent --tag dockpulse-agent:ci .

@@ -1,0 +1,56 @@
+# Development/evaluation only: Server and Agent in one Docker network.
+# Proxmox deployments should use the role-specific files under deploy/.
+name: dockpulse
+services:
+  dockpulse-control:
+    build:
+      context: .
+      dockerfile: Dockerfile.control
+    image: dockpulse/control:0.1.0
+    restart: unless-stopped
+    environment:
+      DOCKPULSE_ENCRYPTION_KEY: ${DOCKPULSE_ENCRYPTION_KEY:?set in .env}
+      DOCKPULSE_BOOTSTRAP_TOKEN: ${DOCKPULSE_BOOTSTRAP_TOKEN:?set in .env}
+    ports:
+      - "${DOCKPULSE_CONTROL_PORT:-8080}:8080"
+    volumes:
+      - dockpulse-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      io.dockpulse.manage: "false"
+
+  dockpulse-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    image: dockpulse/agent:0.1.0
+    restart: unless-stopped
+    depends_on:
+      dockpulse-control:
+        condition: service_healthy
+    environment:
+      DOCKPULSE_AGENT_ID: ${DOCKPULSE_AGENT_ID:-lxc-101}
+      DOCKPULSE_AGENT_NAME: ${DOCKPULSE_AGENT_NAME:-docker-lxc-101}
+      DOCKPULSE_AGENT_URL: http://dockpulse-agent:9090
+      DOCKPULSE_AGENT_SECRET: ${DOCKPULSE_AGENT_SECRET:?set in .env}
+      DOCKPULSE_CONTROL_URL: http://dockpulse-control:8080
+      DOCKPULSE_BOOTSTRAP_TOKEN: ${DOCKPULSE_BOOTSTRAP_TOKEN:?set in .env}
+      DOCKPULSE_READ_ONLY: ${DOCKPULSE_READ_ONLY:-true}
+      DOCKPULSE_COMPOSE_ROOTS: ${DOCKPULSE_COMPOSE_ROOTS:-/opt/stacks,/srv/compose}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${DOCKPULSE_STACKS_PATH:-./examples/stacks}:/opt/stacks:ro
+      - ${DOCKPULSE_COMPOSE_PATH:-./examples/compose}:/srv/compose:ro
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      io.dockpulse.manage: "false"
+
+volumes:
+  dockpulse-data:

@@ -1,0 +1,28 @@
+name: dockpulse-agent
+services:
+  agent:
+    image: dockpulse/agent:0.1.0
+    build:
+      context: ..
+      dockerfile: Dockerfile.agent
+    restart: unless-stopped
+    environment:
+      DOCKPULSE_AGENT_ID: ${DOCKPULSE_AGENT_ID:?set in the agent env file}
+      DOCKPULSE_AGENT_NAME: ${DOCKPULSE_AGENT_NAME:?set in the agent env file}
+      DOCKPULSE_AGENT_URL: ${DOCKPULSE_AGENT_URL:?set in the agent env file}
+      DOCKPULSE_AGENT_SECRET: ${DOCKPULSE_AGENT_SECRET:?set in the agent env file}
+      DOCKPULSE_CONTROL_URL: ${DOCKPULSE_CONTROL_URL:?set in the agent env file}
+      DOCKPULSE_BOOTSTRAP_TOKEN: ${DOCKPULSE_BOOTSTRAP_TOKEN:?set in the agent env file}
+      DOCKPULSE_READ_ONLY: ${DOCKPULSE_READ_ONLY:-true}
+      DOCKPULSE_AGENT_LISTEN_ADDR: ${DOCKPULSE_AGENT_LISTEN_ADDR:-:9090}
+      DOCKPULSE_COMPOSE_ROOTS: ${DOCKPULSE_COMPOSE_ROOTS:-/opt/stacks,/srv/compose}
+    ports:
+      - "${DOCKPULSE_AGENT_PORT:-9090}:9090"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${DOCKPULSE_COMPOSE_ROOT_1:-/opt/stacks}:${DOCKPULSE_COMPOSE_ROOT_1:-/opt/stacks}:ro
+      - ${DOCKPULSE_COMPOSE_ROOT_2:-/srv/compose}:${DOCKPULSE_COMPOSE_ROOT_2:-/srv/compose}:ro
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      io.dockpulse.manage: "false"

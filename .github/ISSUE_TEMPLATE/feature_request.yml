@@ -1,0 +1,26 @@
+name: Feature request
+description: Proponer una mejora operativa o de producto.
+title: "feature: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema a resolver
+      description: Describe el problema operativo, no solo la solución deseada.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Propuesta
+      description: Explica el flujo esperado y los tradeoffs conocidos.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impacto y riesgos
+      description: Seguridad, compatibilidad, migraciones, operación y rollback.
+    validations:
+      required: true
