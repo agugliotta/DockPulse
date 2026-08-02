@@ -336,7 +336,7 @@ No copiar `deploy/agent.env` con el mismo agent secret entre LXCs.
 
 Esta alternativa corresponde **solo al Agent**. El Server continúa usando su Compose y volumen SQLite.
 
-Compilar el Agent con Go 1.24+ para Linux y la arquitectura del LXC:
+Compilar el Agent con Go 1.25+ para Linux y la arquitectura del LXC:
 
 ```bash
 go build -trimpath -o dockpulse-agent ./cmd/dockpulse-agent
