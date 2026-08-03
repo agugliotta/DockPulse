@@ -362,6 +362,41 @@ tbody tr:hover {
 .status.updating {
   color: var(--blue);
 }
+.version-flow {
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+}
+.version-flow strong {
+  color: var(--bright);
+  font-size: 14px;
+}
+.version-flow .path {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.version-token {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 7px;
+  border: 1px solid #2a4146;
+  border-radius: 7px;
+  background: #0a1518;
+  color: #cddbdd;
+  font: 600 12px 'JetBrains Mono';
+}
+.version-token.target {
+  border-color: #4b6737;
+  color: var(--green);
+  background: #0d2117;
+}
+.version-flow .arrow {
+  color: #6e858a;
+  font: 600 12px 'JetBrains Mono';
+}
 .activity {
   list-style: none;
   padding: 5px 18px;

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, type Container } from '$lib/api';
+  import { api, imageVersion, short, type Container } from '$lib/api';
   import Status from '$lib/Status.svelte';
   let containers = $state<Container[]>([]);
   let query = $state('');
@@ -55,7 +55,7 @@
     <div class="table-wrap">
       <table>
         <thead
-          ><tr><th>Workload</th><th>Agent</th><th>Runtime</th><th>Image state</th><th>Management</th></tr
+          ><tr><th>Workload</th><th>Agent</th><th>Runtime</th><th>Version path</th><th>Management</th></tr
           ></thead
         ><tbody
           >{#each shown as c}<tr
@@ -65,14 +65,20 @@
                 ></td
               ><td><a href={`/agents/${c.agent_id}`} class="mono">{c.agent_id}</a></td><td
                 ><Status value={c.runtime_status} /></td
-              ><td
-                >{#if c.update_available}<Status
-                    value="update-available"
-                    label="Update available"
-                  />{:else}<Status value="healthy" label="Current" />{/if}<span class="sub"
-                  >{c.detection_method || 'not evaluated'}</span
-                ></td
-              ><td
+              ><td>
+                <div class="version-flow">
+                  <div class="path">
+                    <span class="version-token">{imageVersion(c)}</span><span class="arrow">-&gt;</span><span
+                      class="version-token target">{imageVersion(c)}</span
+                    >
+                  </div>
+                  <span class="sub">{short(c.current_digest)} -> {short(c.remote_digest)}</span>
+                  {#if c.update_available}<Status
+                      value="update-available"
+                      label="Digest changes"
+                    />{:else}<Status value="healthy" label="Current digest" />{/if}
+                </div>
+              </td><td
                 >{#if c.ignored}<Status value="ignored" />{:else if c.protected || c.sensitive}<Status
                     value="protected"
                   />{:else if c.manageable}<Status value="healthy" label="Managed" />{:else}<Status

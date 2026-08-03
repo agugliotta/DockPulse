@@ -38,6 +38,8 @@
   }
 
   onMount(load);
+
+  const releasePath = $derived(system ? `${system.version || 'unknown'} -> ${system.target_version}` : '');
 </script>
 
 {#if loading}<div class="loading"></div>{/if}
@@ -54,14 +56,12 @@
   {#if system}
     <div class="grid stats">
       <div class="stat">
-        <span class="label">Control version</span><strong>{system.version}</strong><small
-          >Running binary</small
+        <span class="label">Control path</span><strong>{system.version}</strong><small
+          >to {system.target_version}</small
         >
       </div>
       <div class="stat attn">
-        <span class="label">Update target</span><strong>{system.target_version}</strong><small
-          >Compose tag target</small
-        >
+        <span class="label">Release path</span><strong>{releasePath}</strong><small>Current to target</small>
       </div>
       <div class="stat">
         <span class="label">Agents</span><strong>{system.agents.length}</strong><small
@@ -87,7 +87,9 @@
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Agent</th><th>Current</th><th>Target</th><th>Health</th><th>Action</th></tr></thead>
+          <thead
+            ><tr><th>Agent</th><th>Version path</th><th>Health</th><th>Mode</th><th>Action</th></tr></thead
+          >
           <tbody>
             {#each system.agents as agent}
               <tr>
@@ -96,9 +98,23 @@
                     >{agent.id}</span
                   ></td
                 >
-                <td class="mono">{agent.version || 'unknown'}</td>
-                <td class="mono">{system.target_version}</td>
+                <td>
+                  <div class="version-flow">
+                    <div class="path">
+                      <span class="version-token">{agent.version || 'unknown'}</span><span class="arrow"
+                        >-&gt;</span
+                      ><span class="version-token target">{system.target_version}</span>
+                    </div>
+                    <span class="sub">agent release target</span>
+                  </div>
+                </td>
                 <td><Status value={agent.status} /><span class="sub">{since(agent.last_heartbeat)}</span></td>
+                <td>
+                  {#if agent.read_only}<Status value="protected" label="Read only" />{:else}<Status
+                      value="healthy"
+                      label="Writable"
+                    />{/if}
+                </td>
                 <td>
                   <button
                     class="btn primary"

@@ -50,7 +50,7 @@ Las instalaciones de Proxmox descargan imágenes privadas y versionadas desde Gi
 
 Las imágenes se publican al crear tags `vX.Y.Z`. También se publica `latest` para instalaciones que prefieren seguir el release más reciente:
 
-- `DOCKPULSE_VERSION=0.2.0` fija explícitamente la versión desplegada y facilita rollback.
+- `DOCKPULSE_VERSION=0.2.1` fija explícitamente la versión desplegada y facilita rollback.
 - `DOCKPULSE_VERSION=latest` hace que `docker compose pull` resuelva el release más nuevo publicado.
 - `DOCKPULSE_UPDATE_VERSION` indica en la UI/API a qué tag se intentará actualizar; por defecto se recomienda `latest`.
 

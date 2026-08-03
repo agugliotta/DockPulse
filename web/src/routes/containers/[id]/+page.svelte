@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
-  import { api, short, since, type Container, type Job } from '$lib/api';
+  import { api, imageVersion, short, since, type Container, type Job } from '$lib/api';
   import Status from '$lib/Status.svelte';
   let item = $state<Container | null>(null);
   let loading = $state(true);
@@ -99,6 +99,28 @@
     {#if error}<div class="callout errorbox">{error}</div>{/if}{#if item.safety_reason}<div class="callout">
         Policy note: {item.safety_reason}
       </div>{/if}
+    <div class="grid stats">
+      <div class="stat">
+        <span class="label">Service version path</span><strong
+          >{imageVersion(item)} -> {imageVersion(item)}</strong
+        ><small>Image tag used for pull</small>
+      </div>
+      <div class="stat attn">
+        <span class="label">Digest path</span><strong
+          >{short(item.current_digest)} -> {short(item.remote_digest)}</strong
+        ><small>{item.update_available ? 'Registry digest changed' : 'No digest change detected'}</small>
+      </div>
+      <div class="stat">
+        <span class="label">Current source</span><strong>{item.management_kind}</strong><small
+          >{item.compose_project || item.agent_id}</small
+        >
+      </div>
+      <div class="stat">
+        <span class="label">Policy</span><strong>{item.manageable ? 'Managed' : 'Review'}</strong><small
+          >{item.ignored || item.protected ? 'Blocked by flag' : 'Ready for dry-run'}</small
+        >
+      </div>
+    </div>
     <div class="detail-grid">
       <section class="panel">
         <div class="panel-head">
