@@ -1,10 +1,7 @@
 name: dockpulse-control
 services:
   dockpulse-control:
-    image: dockpulse/control:0.1.0
-    build:
-      context: ..
-      dockerfile: Dockerfile.control
+    image: ghcr.io/agugliotta/dockpulse-control:${DOCKPULSE_VERSION:-0.1.0}
     restart: unless-stopped
     environment:
       DOCKPULSE_ENCRYPTION_KEY: ${DOCKPULSE_ENCRYPTION_KEY:?set in the control env file}
