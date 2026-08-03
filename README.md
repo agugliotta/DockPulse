@@ -43,6 +43,13 @@ La guía distingue cada comando y variable por rol:
 
 El `docker-compose.yml` de la raíz levanta Server y Agent juntos. Está destinado a desarrollo o evaluación all-in-one, no es la topología recomendada para Proxmox.
 
+Las instalaciones de Proxmox descargan imágenes privadas y versionadas desde GitHub Container Registry:
+
+- `ghcr.io/agugliotta/dockpulse-control:<version>`
+- `ghcr.io/agugliotta/dockpulse-agent:<version>`
+
+Las imágenes se publican únicamente al crear tags `vX.Y.Z`. No se publica `latest`: `DOCKPULSE_VERSION` fija explícitamente la versión desplegada y hace que un rollback sea predecible.
+
 ## Política de administración
 
 La detección es amplia; la mutación es opt-in y conservadora:

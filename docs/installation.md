@@ -41,14 +41,29 @@ En Debian o Ubuntu:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl git openssl
+sudo apt-get install -y ca-certificates curl openssl
 docker version
 docker compose version
 ```
 
 Si la sesión del LXC ya es `root`, omitir `sudo` en los ejemplos. Si se usa un usuario no-root, debe tener permiso para ejecutar Docker.
 
-Para construir desde este repositorio se requiere conectividad temporal a registries de paquetes durante `docker compose build`.
+### Autenticar Docker en GHCR
+
+El Server y los Agents descargan imágenes privadas de GHCR; no compilan Go o SvelteKit durante la instalación. Todos los LXCs necesitan salida HTTPS a `ghcr.io`.
+
+Crear en GitHub un único **personal access token (classic)** con alcance `read:packages`. Para este homelab puede compartirse entre todos los LXCs: simplifica la operación, aunque obliga a rotarlo en todos a la vez si se revoca o expira. No conceder `write:packages` ni guardar el token en los archivos `.env`.
+
+Ejecutar una vez en el LXC Server y repetir en cada LXC Agent:
+
+```bash
+read -s GHCR_TOKEN
+echo "$GHCR_TOKEN" | sudo docker login ghcr.io --username agugliotta --password-stdin
+unset GHCR_TOKEN
+sudo chmod 600 /root/.docker/config.json
+```
+
+Si Docker corre como usuario no-root, ejecutar el login con ese usuario y proteger su archivo `~/.docker/config.json`. Esta credencial sirve únicamente para descargar paquetes; no reemplaza el bootstrap token ni los secrets HMAC de DockPulse.
 
 ---
 
@@ -56,15 +71,23 @@ Para construir desde este repositorio se requiere conectividad temporal a regist
 
 > **Ejecutar en:** el LXC Linux central elegido para DockPulse Server.
 
-### A1. Obtener el repositorio
+### A1. Copiar los archivos del Server
+
+No hace falta clonar el repositorio privado dentro del LXC. Desde una estación de administración que tenga este repositorio:
 
 ```bash
-sudo install -d -o "$USER" -g "$(id -gn)" /opt/dockpulse
-git clone REPLACE_WITH_REPOSITORY_URL /opt/dockpulse
+ssh root@10.10.0.10 'install -d -m 0755 /opt/dockpulse/deploy'
+scp deploy/docker-compose.control.yml deploy/control.env.example \
+  root@10.10.0.10:/opt/dockpulse/deploy/
+```
+
+Luego, dentro del LXC Server:
+
+```bash
 cd /opt/dockpulse
 ```
 
-Si el código ya está copiado en el LXC, entrar directamente en su directorio.
+Si no se usa SSH como `root`, copiar primero al home del usuario y mover los archivos con `sudo`. Reemplazar la IP de ejemplo por la real.
 
 ### A2. Crear la configuración del Server
 
@@ -78,6 +101,7 @@ openssl rand -hex 32
 Editar `deploy/control.env` y asignar:
 
 ```dotenv
+DOCKPULSE_VERSION=0.1.0
 DOCKPULSE_ENCRYPTION_KEY=<PRIMERA_SALIDA_BASE64>
 DOCKPULSE_BOOTSTRAP_TOKEN=<SEGUNDA_SALIDA_HEX>
 DOCKPULSE_CONTROL_PORT=8080
@@ -101,7 +125,12 @@ docker compose \
 docker compose \
   --env-file deploy/control.env \
   -f deploy/docker-compose.control.yml \
-  up --build -d
+  pull
+
+docker compose \
+  --env-file deploy/control.env \
+  -f deploy/docker-compose.control.yml \
+  up -d
 ```
 
 Este Compose crea únicamente:
@@ -168,11 +197,19 @@ ls -l /var/run/docker.sock
 
 El Agent solo descubrirá y actualizará los contenedores mostrados por este Docker daemon.
 
-### B2. Obtener el repositorio
+### B2. Copiar los archivos del Agent
+
+Desde la estación de administración:
 
 ```bash
-sudo install -d -o "$USER" -g "$(id -gn)" /opt/dockpulse
-git clone REPLACE_WITH_REPOSITORY_URL /opt/dockpulse
+ssh root@10.10.0.101 'install -d -m 0755 /opt/dockpulse/deploy'
+scp deploy/docker-compose.agent.yml deploy/agent.env.example \
+  root@10.10.0.101:/opt/dockpulse/deploy/
+```
+
+Luego, dentro de ese LXC Agent:
+
+```bash
 cd /opt/dockpulse
 ```
 
@@ -187,6 +224,7 @@ openssl rand -hex 32
 Editar `deploy/agent.env`. Ejemplo para el LXC `10.10.0.101`:
 
 ```dotenv
+DOCKPULSE_VERSION=0.1.0
 DOCKPULSE_AGENT_ID=lxc-101
 DOCKPULSE_AGENT_NAME=docker-lxc-101
 DOCKPULSE_AGENT_URL=http://10.10.0.101:9090
@@ -251,7 +289,12 @@ docker compose \
 docker compose \
   --env-file deploy/agent.env \
   -f deploy/docker-compose.agent.yml \
-  up --build -d
+  pull
+
+docker compose \
+  --env-file deploy/agent.env \
+  -f deploy/docker-compose.agent.yml \
+  up -d
 ```
 
 Este Compose crea un `dockpulse-agent`, publica 9090/TCP y monta únicamente el Docker socket de este LXC.
@@ -387,15 +430,14 @@ El MVP no expone variables para instalar una CA privada. La CA debe agregarse al
 
 ### Server
 
-Respaldar el volumen SQLite y conservar `DOCKPULSE_ENCRYPTION_KEY`. Luego, en el LXC Server:
+Respaldar el volumen SQLite y conservar `DOCKPULSE_ENCRYPTION_KEY`. Elegir una versión publicada, cambiar `DOCKPULSE_VERSION` en `deploy/control.env` y luego ejecutar en el LXC Server:
 
 ```bash
 cd /opt/dockpulse
-git pull --ff-only
 docker compose \
   --env-file deploy/control.env \
   -f deploy/docker-compose.control.yml \
-  build --pull
+  pull
 docker compose \
   --env-file deploy/control.env \
   -f deploy/docker-compose.control.yml \
@@ -406,15 +448,14 @@ Las migraciones SQLite se aplican al iniciar.
 
 ### Cada Agent
 
-Actualizar primero en modo read-only o en un LXC no crítico:
+Actualizar primero en modo read-only o en un LXC no crítico. Cambiar `DOCKPULSE_VERSION` en `deploy/agent.env` a la misma versión seleccionada:
 
 ```bash
 cd /opt/dockpulse
-git pull --ff-only
 docker compose \
   --env-file deploy/agent.env \
   -f deploy/docker-compose.agent.yml \
-  build --pull
+  pull
 docker compose \
   --env-file deploy/agent.env \
   -f deploy/docker-compose.agent.yml \
@@ -431,6 +472,7 @@ Verificar heartbeat, inventario y dry-run antes de continuar con el siguiente Ag
 
 | Variable                    | Requerida | Default          | Descripción                                     |
 | --------------------------- | --------- | ---------------- | ----------------------------------------------- |
+| `DOCKPULSE_VERSION`         | No        | `0.1.0`          | Tag inmutable de la imagen de DockPulse         |
 | `DOCKPULSE_ENCRYPTION_KEY`  | Sí        | —                | Clave Base64 de 32 bytes para AES-256-GCM       |
 | `DOCKPULSE_BOOTSTRAP_TOKEN` | Sí        | —                | Token compartido para registrar Agents          |
 | `DOCKPULSE_LISTEN_ADDR`     | No        | `:8080`          | Bind interno del proceso                        |
@@ -442,6 +484,7 @@ Verificar heartbeat, inventario y dry-run antes de continuar con el siguiente Ag
 
 | Variable                      | Requerida | Default                    | Descripción                                 |
 | ----------------------------- | --------- | -------------------------- | ------------------------------------------- |
+| `DOCKPULSE_VERSION`           | No        | `0.1.0`                    | Tag inmutable de la imagen de DockPulse     |
 | `DOCKPULSE_AGENT_ID`          | Sí        | —                          | ID estable y único del Docker LXC           |
 | `DOCKPULSE_AGENT_NAME`        | Sí        | —                          | Nombre visible único                        |
 | `DOCKPULSE_AGENT_URL`         | Sí        | —                          | URL alcanzable desde el Server              |

@@ -1,10 +1,7 @@
 name: dockpulse-agent
 services:
   agent:
-    image: dockpulse/agent:0.1.0
-    build:
-      context: ..
-      dockerfile: Dockerfile.agent
+    image: ghcr.io/agugliotta/dockpulse-agent:${DOCKPULSE_VERSION:-0.1.0}
     restart: unless-stopped
     environment:
       DOCKPULSE_AGENT_ID: ${DOCKPULSE_AGENT_ID:?set in the agent env file}

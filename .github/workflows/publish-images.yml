@@ -1,0 +1,99 @@
+name: Publish container images
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CONTROL_IMAGE: ghcr.io/agugliotta/dockpulse-control
+  AGENT_IMAGE: ghcr.io/agugliotta/dockpulse-agent
+
+jobs:
+  publish:
+    name: Publish linux/amd64 images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Validate release version
+        id: release
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Tag must use vX.Y.Z or vX.Y.Z-suffix format" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Release commit must belong to main" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Build release images
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          SHORT_SHA: ${{ steps.release.outputs.short_sha }}
+        run: |
+          source_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+
+          docker build --pull --platform linux/amd64 \
+            --file Dockerfile.control \
+            --label "org.opencontainers.image.source=$source_url" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.version=$VERSION" \
+            --tag "$CONTROL_IMAGE:$VERSION" \
+            --tag "$CONTROL_IMAGE:sha-$SHORT_SHA" \
+            .
+
+          docker build --pull --platform linux/amd64 \
+            --file Dockerfile.agent \
+            --label "org.opencontainers.image.source=$source_url" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.version=$VERSION" \
+            --tag "$AGENT_IMAGE:$VERSION" \
+            --tag "$AGENT_IMAGE:sha-$SHORT_SHA" \
+            .
+
+      - name: Push release images
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          SHORT_SHA: ${{ steps.release.outputs.short_sha }}
+        run: |
+          docker push "$CONTROL_IMAGE:$VERSION"
+          docker push "$CONTROL_IMAGE:sha-$SHORT_SHA"
+          docker push "$AGENT_IMAGE:$VERSION"
+          docker push "$AGENT_IMAGE:sha-$SHORT_SHA"
+
+      - name: Publish summary
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          {
+            echo "## DockPulse $VERSION"
+            echo
+            echo "- \`$CONTROL_IMAGE:$VERSION\`"
+            echo "- \`$AGENT_IMAGE:$VERSION\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Log out from GHCR
+        if: always()
+        run: docker logout ghcr.io
