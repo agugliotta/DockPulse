@@ -10,6 +10,7 @@ DockPulse centraliza el inventario y las actualizaciones de contenedores Docker 
 - Inventario de contenedores `docker run` y proyectos Docker Compose.
 - Comparación de digests con Docker Hub y Registry v2 anónimo.
 - Dry-run y actualización por contenedor, servicio Compose o stack.
+- Preflight por workload con checks de agent, scope, políticas, contrato y digest.
 - Recreación conservadora de `docker run`, rollback del contenedor anterior y preservación de mounts soportados.
 - Opt-in, ignore/protect, clasificación sensible y modo read-only.
 - Lock persistente por contenedor o stack, historial auditable y logs vía SSE.
@@ -50,7 +51,7 @@ Las instalaciones de Proxmox descargan imágenes privadas y versionadas desde Gi
 
 Las imágenes se publican al crear tags `vX.Y.Z`. También se publica `latest` para instalaciones que prefieren seguir el release más reciente:
 
-- `DOCKPULSE_VERSION=0.2.2` fija explícitamente la versión desplegada y facilita rollback.
+- `DOCKPULSE_VERSION=0.3.0` fija explícitamente la versión desplegada y facilita rollback.
 - `DOCKPULSE_VERSION=latest` hace que `docker compose pull` resuelva el release más nuevo publicado.
 - `DOCKPULSE_UPDATE_VERSION` indica en la UI/API a qué tag se intentará actualizar; por defecto se recomienda `latest`.
 
@@ -84,9 +85,9 @@ docker run -d --name whoami \
 1. En **Agents**, confirmar heartbeat e inventario.
 2. Ejecutar **Refresh inventory** para consultar digests de registry.
 3. Abrir el workload y revisar origen, política y razones de seguridad.
-4. Ejecutar **Inspect dry run**; los valores de entorno se redactan.
-5. Habilitar escrituras solo cuando corresponda y ejecutar **Update now**.
-6. Seguir el job desde **Activity** y conservar el resultado para auditoría.
+4. Revisar **Update readiness** y ejecutar **Inspect dry run**; los valores de entorno se redactan.
+5. Habilitar escrituras solo cuando corresponda y ejecutar **Update now** después de revisar el dry-run.
+6. Seguir cambios e inspecciones desde **Activity** y conservar el resultado para auditoría.
 
 `update_available=false` no siempre significa “imagen actual”: si falta un digest o el registry no respondió, el estado es desconocido. Revisar `detection_method`, digests y `safety_reason`.
 

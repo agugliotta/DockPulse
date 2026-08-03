@@ -3,6 +3,7 @@ package control
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -83,6 +84,49 @@ func TestDryRunDispatchesSignedDomainRequest(t *testing.T) {
 	jobs, err := st.Jobs(ctx, 10)
 	if err != nil || len(jobs) != 1 || jobs[0].Status != domain.StatusSucceeded || jobs[0].DryRunPlan != "safe plan" {
 		t.Fatalf("unexpected jobs: %+v %v", jobs, err)
+	}
+}
+
+func TestPreflightExplainsReadOnlyAgent(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString([]byte("01234567890123456789012345678901"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "preflight.db"), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := t.Context()
+	if err = st.RegisterAgent(ctx, domain.Agent{ID: "a1", Name: "host", BaseURL: "http://agent:9090", ReadOnly: true}, []byte("abcdefghijklmnopqrstuvwxyz123456")); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err = st.Heartbeat(ctx, domain.Heartbeat{AgentID: "a1", ReadOnly: true, SentAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	inv := domain.Inventory{AgentID: "a1", SyncedAt: now, Containers: []domain.Container{{ID: "a1:c1", DockerID: "c1", Name: "web", Image: "nginx:1", CurrentDigest: "sha256:old", RemoteDigest: "sha256:new", UpdateAvailable: true, RuntimeStatus: "running", ManagementKind: "docker-run", Manageable: true, Labels: map[string]string{"io.dockpulse.manage": "true"}}}}
+	if err = st.UpsertInventory(ctx, inv); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/containers/a1:c1/preflight?scope=container", nil)
+	res := httptest.NewRecorder()
+	New(st, "bootstrap", "", slog.New(slog.NewTextHandler(io.Discard, nil))).Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", res.Code, res.Body.String())
+	}
+	var pf domain.UpdatePreflight
+	if err := json.Unmarshal(res.Body.Bytes(), &pf); err != nil {
+		t.Fatal(err)
+	}
+	if !pf.CanDryRun || pf.CanUpdate {
+		t.Fatalf("expected dry-run allowed and update blocked: %+v", pf)
+	}
+	found := false
+	for _, check := range pf.Checks {
+		if check.Key == "agent_mode" && check.Status == "block" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("read-only check missing from preflight: %+v", pf.Checks)
 	}
 }
 

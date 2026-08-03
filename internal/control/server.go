@@ -66,6 +66,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/agents/{id}/self-update", s.selfUpdate)
 	m.HandleFunc("GET /api/v1/containers", s.listContainers)
 	m.HandleFunc("GET /api/v1/containers/{id}", s.getContainer)
+	m.HandleFunc("GET /api/v1/containers/{id}/preflight", s.preflight)
 	m.HandleFunc("POST /api/v1/containers/{id}/dry-run", s.action("dry-run"))
 	m.HandleFunc("POST /api/v1/containers/{id}/update", s.action("update"))
 	m.HandleFunc("POST /api/v1/containers/{id}/ignore", s.flag("ignored", true))
@@ -357,6 +358,126 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, inv)
 }
 
+func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
+	c, err := s.store.Container(r.Context(), r.PathValue("id"))
+	if err != nil {
+		problem(w, 404, "container not found")
+		return
+	}
+	a, err := s.store.Agent(r.Context(), c.AgentID)
+	if err != nil {
+		problem(w, 404, "agent not found")
+		return
+	}
+	scope, err := resolveScope(c, r.URL.Query().Get("scope"))
+	if err != nil {
+		pf := buildPreflight(c, a, r.URL.Query().Get("scope"))
+		writeJSON(w, 200, pf)
+		return
+	}
+	writeJSON(w, 200, buildPreflight(c, a, scope))
+}
+
+func resolveScope(c domain.Container, scope string) (string, error) {
+	if scope == "" {
+		if c.ManagementKind == "compose" {
+			scope = "service"
+		} else {
+			scope = "container"
+		}
+	}
+	if scope != "container" && scope != "service" && scope != "stack" {
+		return scope, fmt.Errorf("scope must be container, service, or stack")
+	}
+	if c.ManagementKind != "compose" && scope != "container" {
+		return scope, fmt.Errorf("docker-run targets only support container scope")
+	}
+	if c.ManagementKind == "compose" && scope == "container" {
+		return scope, fmt.Errorf("compose targets support service or stack scope")
+	}
+	if scope == "stack" && c.ComposeProject == "" {
+		return scope, fmt.Errorf("compose project is unavailable")
+	}
+	return scope, nil
+}
+
+func buildPreflight(c domain.Container, a domain.Agent, scope string) domain.UpdatePreflight {
+	if scope == "" {
+		if c.ManagementKind == "compose" {
+			scope = "service"
+		} else {
+			scope = "container"
+		}
+	}
+	pf := domain.UpdatePreflight{ContainerID: c.ID, AgentID: c.AgentID, Scope: scope, CanDryRun: true, CanUpdate: true}
+	add := func(key, label, status, message string) {
+		pf.Checks = append(pf.Checks, domain.PreflightCheck{Key: key, Label: label, Status: status, Message: message})
+		if status == "block" {
+			pf.CanUpdate = false
+		}
+	}
+	addDryRunBlock := func(key, label, message string) {
+		pf.Checks = append(pf.Checks, domain.PreflightCheck{Key: key, Label: label, Status: "block", Message: message})
+		pf.CanDryRun = false
+		pf.CanUpdate = false
+	}
+	if _, err := resolveScope(c, scope); err != nil {
+		addDryRunBlock("scope", "Update scope", err.Error())
+	} else {
+		add("scope", "Update scope", "pass", "Scope "+scope+" is valid for this "+c.ManagementKind+" workload.")
+	}
+	switch a.Status {
+	case "offline":
+		addDryRunBlock("agent_status", "Agent connectivity", "Agent is offline; DockPulse cannot dispatch dry-run or update requests.")
+	case "degraded":
+		add("agent_status", "Agent connectivity", "warn", "Agent heartbeat is degraded; refresh inventory before updating.")
+	default:
+		add("agent_status", "Agent connectivity", "pass", "Agent is online and reachable from the control plane.")
+	}
+	if a.ReadOnly {
+		add("agent_mode", "Agent mode", "block", "Agent is read-only. Dry-run may work, but updates are blocked until DOCKPULSE_READ_ONLY=false.")
+	} else {
+		add("agent_mode", "Agent mode", "pass", "Agent is writable for confirmed updates.")
+	}
+	if !c.Manageable {
+		addDryRunBlock("manageability", "Workload contract", "Target is not safely manageable: "+c.SafetyReason)
+	} else {
+		add("manageability", "Workload contract", "pass", "DockPulse has enough metadata to inspect and update this workload.")
+	}
+	if c.Ignored {
+		add("ignored", "Ignored policy", "block", "Target is ignored. Unignore it before updating.")
+	} else {
+		add("ignored", "Ignored policy", "pass", "Target is not ignored.")
+	}
+	if c.Protected {
+		add("protected", "Protected policy", "block", "Target is protected. Unprotect it before updating.")
+	} else {
+		add("protected", "Protected policy", "pass", "Target is not protected.")
+	}
+	if c.Sensitive && c.Labels["io.dockpulse.allow-sensitive"] != "true" {
+		addDryRunBlock("sensitive", "Sensitive workload", "Sensitive workload requires io.dockpulse.allow-sensitive=true.")
+	} else if c.Sensitive {
+		add("sensitive", "Sensitive workload", "warn", "Sensitive workload is explicitly allowed; confirm application backup and recovery posture.")
+	} else {
+		add("sensitive", "Sensitive workload", "pass", "No sensitive workload policy is blocking this target.")
+	}
+	if c.ManagementKind == "compose" {
+		if c.ComposeWorkingDir == "" {
+			addDryRunBlock("compose_dir", "Compose directory", "Compose working directory is missing from Docker metadata.")
+		} else {
+			add("compose_dir", "Compose directory", "pass", "Compose project directory is known: "+c.ComposeWorkingDir)
+		}
+	}
+	if c.UpdateAvailable {
+		add("image_digest", "Image freshness", "pass", "Registry digest differs from the local image digest.")
+	} else if c.RemoteDigest == "" || c.CurrentDigest == "" {
+		add("image_digest", "Image freshness", "warn", "Digest comparison is incomplete; refresh inventory before deciding.")
+	} else {
+		add("image_digest", "Image freshness", "warn", "No digest change is currently detected.")
+	}
+	return pf
+}
+
 func (s *Server) selfUpdate(w http.ResponseWriter, r *http.Request) {
 	a, err := s.store.Agent(r.Context(), r.PathValue("id"))
 	if err != nil {
@@ -430,27 +551,9 @@ func (s *Server) action(kind string) http.HandlerFunc {
 			problem(w, 400, err.Error())
 			return
 		}
-		if in.Scope == "" {
-			if c.ManagementKind == "compose" {
-				in.Scope = "service"
-			} else {
-				in.Scope = "container"
-			}
-		}
-		if in.Scope != "container" && in.Scope != "service" && in.Scope != "stack" {
-			problem(w, 400, "scope must be container, service, or stack")
-			return
-		}
-		if c.ManagementKind != "compose" && in.Scope != "container" {
-			problem(w, 400, "docker-run targets only support container scope")
-			return
-		}
-		if c.ManagementKind == "compose" && in.Scope == "container" {
-			problem(w, 400, "compose targets support service or stack scope")
-			return
-		}
-		if in.Scope == "stack" && c.ComposeProject == "" {
-			problem(w, 409, "compose project is unavailable")
+		in.Scope, err = resolveScope(c, in.Scope)
+		if err != nil {
+			problem(w, 400, err.Error())
 			return
 		}
 		if kind == "update" && !in.Confirm {

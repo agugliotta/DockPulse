@@ -1,7 +1,15 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/state';
-  import { api, parsePlan, since, type Job, type JobEvent } from '$lib/api';
+  import {
+    api,
+    jobActionDescription,
+    jobActionLabel,
+    parsePlan,
+    since,
+    type Job,
+    type JobEvent
+  } from '$lib/api';
   import Status from '$lib/Status.svelte';
   let job = $state<Job | null>(null);
   let events = $state<JobEvent[]>([]);
@@ -39,9 +47,11 @@
 <section class="page">
   {#if job}<header class="page-head">
       <div>
-        <span class="eyebrow">Execution detail</span>
-        <h1>{job.action} <span class="mono">{job.id}</span></h1>
-        <p>{job.target_key} · requested {since(job.created_at)} by {job.requested_by}</p>
+        <span class="eyebrow">{job.action === 'dry-run' ? 'Inspection detail' : 'Execution detail'}</span>
+        <h1>{jobActionLabel(job.action)} <span class="mono">{job.id}</span></h1>
+        <p>
+          {job.target_key} · {jobActionDescription(job.action)} · requested {since(job.created_at)} by {job.requested_by}
+        </p>
       </div>
       <Status value={job.status} />
     </header>
@@ -50,10 +60,14 @@
         style="margin-bottom:16px"
       >
         <div class="panel-head">
-          <h2>Dry-run plan</h2>
-          <span>No Docker changes were made</span>
+          <h2>Dry-run inspection</h2>
+          <span>This is the plan DockPulse would execute after confirmation</span>
         </div>
         <div style="padding:16px">
+          <div class="callout">
+            No Docker changes were made. This result is saved for audit so you can review it before running
+            Update now.
+          </div>
           {#if plan}
             <div class="plan">
               <div class="plan-summary">

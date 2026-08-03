@@ -1,6 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, since, type Agent, type Container, type Job } from '$lib/api';
+  import {
+    api,
+    jobActionDescription,
+    jobActionLabel,
+    jobTarget,
+    since,
+    type Agent,
+    type Container,
+    type Job
+  } from '$lib/api';
   import Status from '$lib/Status.svelte';
   let agents = $state<Agent[]>([]);
   let containers = $state<Container[]>([]);
@@ -24,6 +33,9 @@
   }
   onMount(load);
   const updates = $derived(containers.filter((c) => c.update_available && !c.ignored));
+  const agentIssues = $derived(agents.filter((a) => a.status !== 'healthy' || a.read_only));
+  const changeJobs = $derived(jobs.filter((j) => j.action !== 'dry-run'));
+  const inspectionJobs = $derived(jobs.filter((j) => j.action === 'dry-run'));
   const online = $derived(agents.filter((a) => a.status === 'healthy').length);
   const active = $derived(jobs.filter((j) => ['queued', 'running'].includes(j.status)).length);
 </script>
@@ -65,8 +77,8 @@
     <section class="panel">
       <div class="panel-head">
         <div>
-          <h2>Update candidates</h2>
-          <span>Digest changes verified against registry metadata</span>
+          <h2>Workload update candidates</h2>
+          <span>Services with registry digest changes</span>
         </div>
         <a class="btn" href="/containers">View inventory</a>
       </div>
@@ -104,20 +116,62 @@
     <section class="panel">
       <div class="panel-head">
         <div>
-          <h2>Recent activity</h2>
-          <span>Latest control-plane jobs</span>
+          <h2>Agent readiness</h2>
+          <span>Agents are prerequisites, not update candidates</span>
         </div>
-        <a href="/jobs" class="btn">All jobs</a>
+        <a href="/agents" class="btn">All agents</a>
       </div>
       <ul class="activity">
-        {#each jobs as j}<li>
-            <i class:success={j.status === 'succeeded'} class:failure={j.status === 'failed'}></i>
+        {#each agentIssues.slice(0, 8) as agent}<li>
+            <i
+              class:success={agent.status === 'healthy' && !agent.read_only}
+              class:failure={agent.status === 'offline'}
+            ></i>
             <div>
-              <a href={`/jobs/${j.id}`}><strong>{j.action} · {j.target_key.split(':').at(-1)}</strong></a
-              ><small>{j.status} · {since(j.created_at)} · {j.requested_by}</small>
+              <a href={`/agents/${agent.id}`}><strong>{agent.name}</strong></a><small
+                >{agent.status} · {agent.read_only ? 'read-only' : 'writable'} · heartbeat {since(
+                  agent.last_heartbeat
+                )}</small
+              >
             </div>
-          </li>{:else}<li><div>No job history yet.</div></li>{/each}
+          </li>{:else}<li><div>All agents are healthy and writable.</div></li>{/each}
       </ul>
     </section>
   </div>
+  <section class="panel" style="margin-top:16px">
+    <div class="panel-head">
+      <div>
+        <h2>Recent activity</h2>
+        <span>Updates and self-updates first; dry-runs are listed as inspections</span>
+      </div>
+      <a href="/jobs" class="btn">All activity</a>
+    </div>
+    <div class="activity-columns">
+      <div>
+        <h3>Changes</h3>
+        <ul class="activity compact">
+          {#each changeJobs.slice(0, 6) as j}<li>
+              <i class:success={j.status === 'succeeded'} class:failure={j.status === 'failed'}></i>
+              <div>
+                <a href={`/jobs/${j.id}`}><strong>{jobActionLabel(j.action)} · {jobTarget(j)}</strong></a
+                ><small>{j.status} · {since(j.created_at)} · {jobActionDescription(j.action)}</small>
+              </div>
+            </li>{:else}<li><div>No update executions yet.</div></li>{/each}
+        </ul>
+      </div>
+      <div>
+        <h3>Inspections</h3>
+        <ul class="activity compact">
+          {#each inspectionJobs.slice(0, 4) as j}<li>
+              <i class="inspection"></i>
+              <div>
+                <a href={`/jobs/${j.id}`}><strong>Dry-run · {jobTarget(j)}</strong></a><small
+                  >{since(j.created_at)} · no Docker changes</small
+                >
+              </div>
+            </li>{:else}<li><div>No dry-run inspections yet.</div></li>{/each}
+        </ul>
+      </div>
+    </div>
+  </section>
 </section>

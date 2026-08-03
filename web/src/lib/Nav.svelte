@@ -21,6 +21,6 @@
       >{/each}
   </nav>
   <div class="sidebar-foot">
-    <span class="connection"><i></i> Control online</span><small>v0.2.2 · MVP</small>
+    <span class="connection"><i></i> Control online</span><small>v0.3.0 · MVP</small>
   </div>
 </aside>

@@ -7,10 +7,11 @@ Esta guía describe el comportamiento operativo del MVP. Las reglas críticas se
 1. Revisar **Agents**: no ejecutar cambios en agentes `degraded` u `offline`.
 2. Ejecutar **Refresh inventory** en el agente objetivo.
 3. Filtrar workloads con update y abrir el detalle.
-4. Confirmar imagen, digest local/remoto, origen y política.
-5. Ejecutar dry-run y revisar todos los pasos y warnings.
-6. Para una primera intervención, actualizar un servicio no crítico antes que un stack completo.
-7. Seguir el job hasta estado terminal y revisar logs del servicio después de DockPulse.
+4. Revisar **Update readiness**: el preflight muestra agent, scope, políticas, contrato y digest.
+5. Ejecutar dry-run y revisar todos los pasos y warnings. Dry-run es una inspección; no cambia Docker.
+6. Confirmar **Update now** solo después de revisar el dry-run para el mismo scope.
+7. Para una primera intervención, actualizar un servicio no crítico antes que un stack completo.
+8. Seguir el job hasta estado terminal y revisar logs del servicio después de DockPulse.
 
 DockPulse confirma que el contenedor quedó `running`; no confirma que la aplicación responda correctamente. La validación funcional posterior sigue siendo responsabilidad del operador.
 
@@ -37,6 +38,21 @@ La freshness usa el reloj del control plane, no el timestamp informado por el ag
 | `manageable=false` | el agente no puede reconstruir/administrar el objetivo con seguridad |
 
 `ignored` y `protected` bloquean updates; se mantienen separados para expresar intención operativa. Un error de registry puede aparecer en `safety_reason` sin volver no administrable al contenedor: significa que la evaluación de update quedó incompleta.
+
+## Preflight y dry-run
+
+La vista de detalle de un workload ejecuta un preflight para el scope seleccionado (`container`, `service` o `stack`). El preflight no toca Docker; resume las condiciones que pueden permitir, advertir o bloquear un update:
+
+- conectividad y modo del Agent;
+- scope válido para Docker run o Compose;
+- contrato administrable y directorio Compose disponible;
+- flags `ignored` y `protected`;
+- política de workloads sensibles;
+- comparación de digest local/remoto.
+
+`Can dry-run` y `Can update` se calculan por separado. Un Agent en read-only puede permitir dry-run pero bloquear update; un workload no administrable bloquea ambos. La UI exige un dry-run exitoso para el mismo scope antes de habilitar **Update now**.
+
+Dry-run crea una inspección auditable en Activity. Si aparece como `Inspection`, significa que DockPulse validó y guardó el plan, no que haya recreado contenedores.
 
 ## Detección de imágenes
 
@@ -187,6 +203,9 @@ Dry-run y update explícito:
 ```bash
 CONTAINER_ID='lxc-101:docker-id'
 
+curl -fsS \
+  "$DOCKPULSE_URL/api/v1/containers/$CONTAINER_ID/preflight?scope=container"
+
 curl -fsS -X POST \
   -H 'Content-Type: application/json' \
   -H 'X-DockPulse-User: operator@example' \
@@ -216,6 +235,7 @@ Endpoints principales:
 | `GET /system`                                                       | versión actual, target y Agents                                  |
 | `GET /agents/:id/containers`                                        | inventario por agente                                            |
 | `GET /containers`, `GET /containers/:id`                            | inventario global/detalle                                        |
+| `GET /containers/:id/preflight`                                      | checklist de elegibilidad por scope                              |
 | `POST /containers/:id/dry-run`                                      | plan validado                                                    |
 | `POST /containers/:id/update`                                       | update con confirmación                                          |
 | `POST /containers/:id/ignore\|unignore\|protect\|unprotect`         | política individual                                              |

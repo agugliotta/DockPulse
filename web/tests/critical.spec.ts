@@ -33,6 +33,18 @@ const container = {
   manageable: true,
   last_sync: new Date().toISOString()
 };
+const preflight = {
+  container_id: container.id,
+  agent_id: container.agent_id,
+  scope: 'service',
+  can_dry_run: true,
+  can_update: true,
+  checks: [
+    { key: 'scope', label: 'Update scope', status: 'pass', message: 'Scope service is valid.' },
+    { key: 'agent_status', label: 'Agent connectivity', status: 'pass', message: 'Agent is online.' },
+    { key: 'agent_mode', label: 'Agent mode', status: 'pass', message: 'Agent is writable.' }
+  ]
+};
 
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/v1/**', async (route) => {
@@ -42,6 +54,7 @@ test.beforeEach(async ({ page }) => {
     if (path === '/api/v1/containers') return route.fulfill({ json: [container] });
     if (path === '/api/v1/jobs') return route.fulfill({ json: [] });
     if (path === `/api/v1/containers/${container.id}`) return route.fulfill({ json: container });
+    if (path === `/api/v1/containers/${container.id}/preflight`) return route.fulfill({ json: preflight });
     if (path.endsWith('/dry-run'))
       return route.fulfill({
         status: 202,

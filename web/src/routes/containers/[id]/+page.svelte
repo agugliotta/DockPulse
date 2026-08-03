@@ -2,31 +2,65 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
-  import { api, imageVersion, parsePlan, short, since, type Container, type Job } from '$lib/api';
+  import {
+    api,
+    imageVersion,
+    parsePlan,
+    short,
+    since,
+    type Container,
+    type Job,
+    type UpdatePreflight
+  } from '$lib/api';
   import Status from '$lib/Status.svelte';
   let item = $state<Container | null>(null);
+  let preflight = $state<UpdatePreflight | null>(null);
   let loading = $state(true);
   let error = $state('');
   let modal = $state('');
   let modalText = $state('');
   let scope = $state('service');
   let dryRunPlan = $state<ReturnType<typeof parsePlan>>(null);
+  let dryRunScope = $state('');
+  const dryRunReviewed = $derived(Boolean(dryRunPlan && dryRunScope === scope));
+  const updateReady = $derived(Boolean(preflight?.can_update && dryRunReviewed));
+  const blockers = $derived(preflight?.checks.filter((check) => check.status === 'block') ?? []);
   async function load() {
     loading = true;
     try {
       const loaded = await api<Container>(`/containers/${page.params.id}`);
       item = loaded;
       scope = loaded.management_kind === 'compose' ? 'service' : 'container';
+      dryRunPlan = null;
+      dryRunScope = '';
+      await loadPreflight(scope);
     } catch (e) {
       error = (e as Error).message;
     } finally {
       loading = false;
     }
   }
+  async function loadPreflight(nextScope = scope) {
+    preflight = await api<UpdatePreflight>(
+      `/containers/${page.params.id}/preflight?scope=${encodeURIComponent(nextScope)}`
+    );
+  }
+  async function changeScope(nextScope: string) {
+    scope = nextScope;
+    dryRunPlan = null;
+    dryRunScope = '';
+    error = '';
+    try {
+      await loadPreflight(nextScope);
+    } catch (e) {
+      error = (e as Error).message;
+    }
+  }
   async function flag(action: string) {
     loading = true;
     try {
       item = await api<Container>(`/containers/${page.params.id}/${action}`, { method: 'POST', body: '{}' });
+      await loadPreflight(scope);
     } catch (e) {
       error = (e as Error).message;
     } finally {
@@ -58,6 +92,8 @@
       modal = 'Dry-run plan';
       modalText = j.dry_run_plan || 'Plan accepted';
       dryRunPlan = parsePlan(j.dry_run_plan);
+      dryRunScope = scope;
+      await loadPreflight(scope);
     } catch (e) {
       error = (e as Error).message;
     } finally {
@@ -65,6 +101,13 @@
     }
   }
   async function update() {
+    if (!updateReady) {
+      modal = 'Update not ready';
+      modalText = blockers.length
+        ? blockers.map((check) => `${check.label}: ${check.message}`).join('\n')
+        : 'Run and review Inspect dry run before confirming this update.';
+      return;
+    }
     loading = true;
     error = '';
     try {
@@ -171,31 +214,61 @@
     <section class="panel" style="margin-top:16px">
       <div class="panel-head">
         <div>
-          <h2>Operations</h2>
-          <span>All destructive operations require explicit confirmation</span>
+          <h2>Update readiness</h2>
+          <span>Preflight checks for the selected scope</span>
         </div>
       </div>
-      <div style="padding:16px;display:flex;gap:8px;flex-wrap:wrap">
-        {#if item.management_kind === 'compose'}<select class="btn" bind:value={scope}
-            ><option value="service">This service</option><option value="stack">Entire stack</option></select
-          >{/if}<button class="btn" disabled={!item.manageable} onclick={dry}>Inspect dry run</button><button
-          class="btn primary"
-          disabled={!item.manageable || item.ignored || item.protected}
-          onclick={() => {
-            modal = 'Confirm update';
-            modalText = `DockPulse will execute the reviewed ${scope} update on ${item?.name}. Persistent data mounts are preserved, but application-level rollback is not guaranteed.`;
-            dryRunPlan = null;
-          }}>Update now</button
-        ><button class="btn" onclick={() => flag(item?.ignored ? 'unignore' : 'ignore')}
-          >{item.ignored ? 'Unignore' : 'Ignore'}</button
-        ><button class="btn" onclick={() => flag(item?.protected ? 'unprotect' : 'protect')}
-          >{item.protected ? 'Unprotect' : 'Protect'}</button
-        >
-        {#if item.management_kind === 'compose'}<button
-            class="btn"
-            onclick={() => flagStack(item?.ignored ? 'unignore' : 'ignore')}
-            >{item.ignored ? 'Unignore stack' : 'Ignore stack'}</button
-          >{/if}
+      <div class="readiness">
+        <div class="readiness-flow">
+          <div class:ready={Boolean(preflight)}>
+            <span>1</span><strong>Preflight</strong><small>Rules checked</small>
+          </div>
+          <div class:ready={dryRunReviewed}>
+            <span>2</span><strong>Dry-run</strong><small>{dryRunReviewed ? 'Reviewed' : 'Required'}</small>
+          </div>
+          <div class:ready={updateReady}>
+            <span>3</span><strong>Update</strong><small>{updateReady ? 'Ready' : 'Blocked'}</small>
+          </div>
+        </div>
+        {#if preflight}
+          <div class="checklist">
+            {#each preflight.checks as check}
+              <div class="check {check.status}">
+                <Status value={check.status} label={check.status} />
+                <div><strong>{check.label}</strong><span>{check.message}</span></div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+        {#if !dryRunReviewed}
+          <div class="callout">Run Inspect dry run for this scope before Update now becomes available.</div>
+        {/if}
+        <div class="operation-actions">
+          {#if item.management_kind === 'compose'}<select
+              class="btn"
+              value={scope}
+              onchange={(e) => changeScope(e.currentTarget.value)}
+              ><option value="service">This service</option><option value="stack">Entire stack</option
+              ></select
+            >{/if}<button class="btn" disabled={!preflight?.can_dry_run} onclick={dry}>Inspect dry run</button
+          ><button
+            class="btn primary"
+            disabled={!updateReady}
+            onclick={() => {
+              modal = 'Confirm update';
+              modalText = `DockPulse will execute the reviewed ${scope} update on ${item?.name}. Persistent data mounts are preserved, but application-level rollback is not guaranteed.`;
+            }}>Update now</button
+          ><button class="btn" onclick={() => flag(item?.ignored ? 'unignore' : 'ignore')}
+            >{item.ignored ? 'Unignore' : 'Ignore'}</button
+          ><button class="btn" onclick={() => flag(item?.protected ? 'unprotect' : 'protect')}
+            >{item.protected ? 'Unprotect' : 'Protect'}</button
+          >
+          {#if item.management_kind === 'compose'}<button
+              class="btn"
+              onclick={() => flagStack(item?.ignored ? 'unignore' : 'ignore')}
+              >{item.ignored ? 'Unignore stack' : 'Ignore stack'}</button
+            >{/if}
+        </div>
       </div>
     </section>{/if}
 </section>
@@ -209,6 +282,9 @@
     <div class="modal" role="dialog" aria-modal="true">
       <h2>{modal}</h2>
       {#if modal === 'Dry-run plan'}
+        <div class="callout">
+          Dry-run is an inspection only: DockPulse validated what it would do, but did not change Docker.
+        </div>
         {#if dryRunPlan}
           <div class="plan">
             <div class="plan-summary">
@@ -227,9 +303,12 @@
         {:else}
           <pre>{modalText}</pre>
         {/if}
-      {:else}<p>{modalText}</p>
+      {:else if modal === 'Update not ready'}<pre>{modalText}</pre>
         <div class="callout">
-          This action recreates runtime state. Confirm only after reviewing the dry-run.
+          Fix the blocked checks or run a fresh dry-run for the selected scope.
+        </div>{:else}<p>{modalText}</p>
+        <div class="callout">
+          This action recreates runtime state using the dry-run you just reviewed.
         </div>{/if}
       <div class="actions" style="justify-content:flex-end;margin-top:16px">
         <button class="btn" onclick={() => (modal = '')}>Cancel</button

@@ -46,6 +46,22 @@ type Container struct {
 	LastSync          time.Time         `json:"last_sync"`
 }
 
+type PreflightCheck struct {
+	Key     string `json:"key"`
+	Label   string `json:"label"`
+	Status  string `json:"status"` // pass, warn, block
+	Message string `json:"message"`
+}
+
+type UpdatePreflight struct {
+	ContainerID string           `json:"container_id"`
+	AgentID     string           `json:"agent_id"`
+	Scope       string           `json:"scope"`
+	CanDryRun   bool             `json:"can_dry_run"`
+	CanUpdate   bool             `json:"can_update"`
+	Checks      []PreflightCheck `json:"checks"`
+}
+
 type Inventory struct {
 	AgentID    string      `json:"agent_id"`
 	Containers []Container `json:"containers"`
