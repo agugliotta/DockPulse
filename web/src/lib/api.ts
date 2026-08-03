@@ -54,6 +54,12 @@ export type SystemInfo = {
   target_version: string;
   agents: Agent[];
 };
+export type DryRunPlan = {
+  target: string;
+  scope: string;
+  steps: string[];
+  warnings?: string[];
+};
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`/api/v1${path}`, {
@@ -66,6 +72,14 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 export const short = (v?: string) => (v ? v.replace('sha256:', '').slice(0, 12) : '—');
 export const imageVersion = (c: Container) => c.tag || c.image.split(':').at(-1) || 'latest';
+export const parsePlan = (v?: string): DryRunPlan | null => {
+  if (!v) return null;
+  try {
+    return JSON.parse(v) as DryRunPlan;
+  } catch {
+    return null;
+  }
+};
 export const since = (v?: string) => {
   if (!v) return 'never';
   const d = (Date.now() - new Date(v).getTime()) / 1000;

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
-  import { api, imageVersion, short, since, type Container, type Job } from '$lib/api';
+  import { api, imageVersion, parsePlan, short, since, type Container, type Job } from '$lib/api';
   import Status from '$lib/Status.svelte';
   let item = $state<Container | null>(null);
   let loading = $state(true);
@@ -10,6 +10,7 @@
   let modal = $state('');
   let modalText = $state('');
   let scope = $state('service');
+  let dryRunPlan = $state<ReturnType<typeof parsePlan>>(null);
   async function load() {
     loading = true;
     try {
@@ -56,6 +57,7 @@
       });
       modal = 'Dry-run plan';
       modalText = j.dry_run_plan || 'Plan accepted';
+      dryRunPlan = parsePlan(j.dry_run_plan);
     } catch (e) {
       error = (e as Error).message;
     } finally {
@@ -182,6 +184,7 @@
           onclick={() => {
             modal = 'Confirm update';
             modalText = `DockPulse will execute the reviewed ${scope} update on ${item?.name}. Persistent data mounts are preserved, but application-level rollback is not guaranteed.`;
+            dryRunPlan = null;
           }}>Update now</button
         ><button class="btn" onclick={() => flag(item?.ignored ? 'unignore' : 'ignore')}
           >{item.ignored ? 'Unignore' : 'Ignore'}</button
@@ -205,7 +208,26 @@
   >
     <div class="modal" role="dialog" aria-modal="true">
       <h2>{modal}</h2>
-      {#if modal === 'Dry-run plan'}<pre>{modalText}</pre>{:else}<p>{modalText}</p>
+      {#if modal === 'Dry-run plan'}
+        {#if dryRunPlan}
+          <div class="plan">
+            <div class="plan-summary">
+              <div><span>Target</span><strong>{dryRunPlan.target}</strong></div>
+              <div><span>Scope</span><strong>{dryRunPlan.scope}</strong></div>
+            </div>
+            <ol class="plan-steps">
+              {#each dryRunPlan.steps as step}<li>{step}</li>{/each}
+            </ol>
+            {#if dryRunPlan.warnings?.length}
+              <div class="plan-warnings">
+                {#each dryRunPlan.warnings as warning}<div class="callout">{warning}</div>{/each}
+              </div>
+            {/if}
+          </div>
+        {:else}
+          <pre>{modalText}</pre>
+        {/if}
+      {:else}<p>{modalText}</p>
         <div class="callout">
           This action recreates runtime state. Confirm only after reviewing the dry-run.
         </div>{/if}

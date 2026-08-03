@@ -514,6 +514,43 @@ tbody tr:hover {
   font-size: 14px;
   margin: 12px 0;
 }
+.plan {
+  display: grid;
+  gap: 16px;
+}
+.plan-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.plan-summary div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #091518;
+  padding: 12px;
+}
+.plan-summary span {
+  display: block;
+  color: #6f878d;
+  font: 600 10px 'JetBrains Mono';
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.plan-summary strong {
+  color: var(--bright);
+}
+.plan-steps {
+  margin: 0;
+  padding-left: 24px;
+  color: #c4d2d4;
+}
+.plan-steps li {
+  margin: 8px 0;
+}
+.plan-warnings {
+  display: grid;
+  gap: 8px;
+}
 .errorbox {
   border-color: #633238;
   background: #261416;

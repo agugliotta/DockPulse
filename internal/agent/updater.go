@@ -91,7 +91,7 @@ func (u Updater) SelfUpdatePlan(targetVersion string) (Plan, error) {
 	if targetVersion == "" {
 		targetVersion = "latest"
 	}
-	return Plan{Target: cfg.Project + "/" + cfg.Service, Scope: "self-update", Steps: []string{"Set DOCKPULSE_VERSION=" + targetVersion + " for this Compose run", "Pull DockPulse service image: docker compose pull " + cfg.Service, "Recreate service from " + cfg.Directory + ": docker compose up -d " + cfg.Service, "The agent may briefly disconnect while the service is replaced"}, Warnings: []string{"self-update is opt-in and depends on the host Compose file using DOCKPULSE_VERSION in the image tag"}}, nil
+	return Plan{Target: cfg.Project + "/" + cfg.Service, Scope: "self-update", Steps: []string{"Use target DockPulse image tag " + targetVersion + " for this update", "Ask Docker Compose to download the newest image for service " + cfg.Service, "Recreate only service " + cfg.Service + " from " + cfg.Directory, "Expect the agent to briefly disconnect while Docker replaces it"}, Warnings: []string{"self-update is opt-in and depends on the host Compose file using DOCKPULSE_VERSION in the image tag"}}, nil
 }
 
 func (u Updater) ExecuteSelfUpdate(ctx context.Context, targetVersion string, logf func(string, string)) error {
@@ -187,7 +187,7 @@ func (u Updater) composePlan(ctx context.Context, in inspectContainer, scope str
 	if scope == "service" {
 		suffix = " " + service
 	}
-	return Plan{Target: target, Scope: scope, Steps: []string{"Affected services: " + strings.Join(services, ", "), "Pull immutable manifest(s): docker compose pull" + suffix, "Reconcile project from " + dir + ": docker compose up -d" + suffix, "Inspect resulting container image digest and health"}}, nil
+	return Plan{Target: target, Scope: scope, Steps: []string{"Update scope: " + scope + " " + target, "Services that may be recreated: " + strings.Join(services, ", "), "Download the newest image for the selected service(s) without changing anything yet", "Run Docker Compose from " + dir + " to recreate the selected service(s)", "After the update, refresh inventory and compare the new local digest against the registry digest"}, Warnings: []string{"Compose keeps volumes and bind mounts, but DockPulse does not verify application-level health after the container starts", "Equivalent commands: docker compose pull" + suffix + " && docker compose up -d" + suffix}}, nil
 }
 func (u Updater) validateDir(dir string) error {
 	return validateComposeDir(dir, u.AllowedComposeRoots)
@@ -215,7 +215,7 @@ func (u Updater) runPlan(in inspectContainer) (Plan, error) {
 		return Plan{}, err
 	}
 	safe := redactArgs(args)
-	return Plan{Target: strings.TrimPrefix(in.Name, "/"), Scope: "container", Steps: []string{"Pull image " + in.Config.Image, "Stop and rename the current container as a rollback candidate", "Create replacement: docker " + strings.Join(safe, " "), "Start replacement and verify Docker reports it running", "Remove rollback candidate only after successful start"}, Warnings: warnings}, nil
+	return Plan{Target: strings.TrimPrefix(in.Name, "/"), Scope: "container", Steps: []string{"Download the newest image for " + in.Config.Image, "Stop the current container and keep it temporarily as a rollback candidate", "Create a replacement container with the same supported ports, mounts, labels and environment", "Start the replacement and verify Docker reports it running", "Remove the rollback candidate only after the replacement starts"}, Warnings: append(warnings, "Equivalent create command: docker "+strings.Join(safe, " "))}, nil
 }
 
 func createArgs(in inspectContainer, name string) ([]string, []string, error) {

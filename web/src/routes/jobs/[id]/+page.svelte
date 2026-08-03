@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/state';
-  import { api, since, type Job, type JobEvent } from '$lib/api';
+  import { api, parsePlan, since, type Job, type JobEvent } from '$lib/api';
   import Status from '$lib/Status.svelte';
   let job = $state<Job | null>(null);
   let events = $state<JobEvent[]>([]);
   let error = $state('');
   let source = $state<EventSource | null>(null);
+  const plan = $derived(parsePlan(job?.dry_run_plan));
   async function load() {
     try {
       [job, events] = await Promise.all([
@@ -48,14 +49,40 @@
         class="panel"
         style="margin-bottom:16px"
       >
-        <div class="panel-head"><h2>Dry-run plan</h2></div>
-        <div style="padding:16px"><pre>{job.dry_run_plan}</pre></div>
+        <div class="panel-head">
+          <h2>Dry-run plan</h2>
+          <span>No Docker changes were made</span>
+        </div>
+        <div style="padding:16px">
+          {#if plan}
+            <div class="plan">
+              <div class="plan-summary">
+                <div><span>Target</span><strong>{plan.target}</strong></div>
+                <div><span>Scope</span><strong>{plan.scope}</strong></div>
+              </div>
+              <ol class="plan-steps">
+                {#each plan.steps as step}<li>{step}</li>{/each}
+              </ol>
+              {#if plan.warnings?.length}
+                <div class="plan-warnings">
+                  {#each plan.warnings as warning}<div class="callout">{warning}</div>{/each}
+                </div>
+              {/if}
+            </div>
+          {:else}
+            <pre>{job.dry_run_plan}</pre>
+          {/if}
+        </div>
       </section>{/if}
     <section class="panel">
       <div class="panel-head">
         <div>
           <h2>Execution log</h2>
-          <span>SSE live stream · correlation {job.correlation_id || 'n/a'}</span>
+          <span
+            >{job.action === 'dry-run'
+              ? 'Validation result'
+              : `SSE live stream · correlation ${job.correlation_id || 'n/a'}`}</span
+          >
         </div>
         <span>{events.length} events</span>
       </div>
@@ -63,7 +90,11 @@
         {#each events as e}<div class="log-row">
             <span>{new Date(e.created_at).toLocaleTimeString()}</span><span class={e.level}>{e.level}</span
             ><span>{e.message}</span>
-          </div>{:else}<div>Waiting for agent events…</div>{/each}
+          </div>{:else}<div>
+            {job.action === 'dry-run'
+              ? 'Dry-run completed. Live execution logs only appear when you run Update now.'
+              : 'Waiting for agent events...'}
+          </div>{/each}
       </div>
     </section>{:else if error}<div class="callout errorbox">{error}</div>{/if}
 </section>
