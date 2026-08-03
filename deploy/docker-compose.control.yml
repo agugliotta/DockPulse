@@ -1,11 +1,13 @@
 name: dockpulse-control
 services:
   dockpulse-control:
-    image: ghcr.io/agugliotta/dockpulse-control:${DOCKPULSE_VERSION:-0.1.0}
+    image: ghcr.io/agugliotta/dockpulse-control:${DOCKPULSE_VERSION:-latest}
     restart: unless-stopped
     environment:
       DOCKPULSE_ENCRYPTION_KEY: ${DOCKPULSE_ENCRYPTION_KEY:?set in the control env file}
       DOCKPULSE_BOOTSTRAP_TOKEN: ${DOCKPULSE_BOOTSTRAP_TOKEN:?set in the control env file}
+      DOCKPULSE_VERSION: ${DOCKPULSE_VERSION:-latest}
+      DOCKPULSE_UPDATE_VERSION: ${DOCKPULSE_UPDATE_VERSION:-latest}
     ports:
       - "${DOCKPULSE_CONTROL_PORT:-8080}:8080"
     volumes:

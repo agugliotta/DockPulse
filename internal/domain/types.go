@@ -89,6 +89,12 @@ type ActionResponse struct {
 	Plan  string `json:"plan,omitempty"`
 }
 
+type SelfUpdateRequest struct {
+	ControlJobID  string `json:"control_job_id"`
+	TargetVersion string `json:"target_version"`
+	Confirm       bool   `json:"confirm"`
+}
+
 type Heartbeat struct {
 	AgentID   string     `json:"agent_id"`
 	Version   string     `json:"version"`

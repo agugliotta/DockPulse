@@ -49,6 +49,11 @@ export type Job = {
   finished_at?: string;
 };
 export type JobEvent = { id: number; job_id: string; level: string; message: string; created_at: string };
+export type SystemInfo = {
+  version: string;
+  target_version: string;
+  agents: Agent[];
+};
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`/api/v1${path}`, {

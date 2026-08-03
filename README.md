@@ -48,7 +48,13 @@ Las instalaciones de Proxmox descargan imágenes privadas y versionadas desde Gi
 - `ghcr.io/agugliotta/dockpulse-control:<version>`
 - `ghcr.io/agugliotta/dockpulse-agent:<version>`
 
-Las imágenes se publican únicamente al crear tags `vX.Y.Z`. No se publica `latest`: `DOCKPULSE_VERSION` fija explícitamente la versión desplegada y hace que un rollback sea predecible.
+Las imágenes se publican al crear tags `vX.Y.Z`. También se publica `latest` para instalaciones que prefieren seguir el release más reciente:
+
+- `DOCKPULSE_VERSION=0.2.0` fija explícitamente la versión desplegada y facilita rollback.
+- `DOCKPULSE_VERSION=latest` hace que `docker compose pull` resuelva el release más nuevo publicado.
+- `DOCKPULSE_UPDATE_VERSION` indica en la UI/API a qué tag se intentará actualizar; por defecto se recomienda `latest`.
+
+La página **System** muestra la versión actual del control plane, la versión reportada por cada agent y el target configurado.
 
 ## Política de administración
 

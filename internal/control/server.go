@@ -29,18 +29,32 @@ type Server struct {
 	client    *http.Client
 	log       *slog.Logger
 	webDir    string
+	cfg       Config
 	subsMu    sync.Mutex
 	subs      map[string]map[chan domain.Event]struct{}
 	replay    *auth.ReplayGuard
 }
 
-func New(st *store.Store, bootstrap, webDir string, log *slog.Logger) *Server {
-	return &Server{store: st, bootstrap: bootstrap, client: &http.Client{Timeout: 20 * time.Second}, log: log, webDir: webDir, subs: make(map[string]map[chan domain.Event]struct{}), replay: auth.NewReplayGuard()}
+type Config struct {
+	Version       string
+	TargetVersion string
+}
+
+func New(st *store.Store, bootstrap, webDir string, log *slog.Logger, cfg ...Config) *Server {
+	c := Config{Version: "dev", TargetVersion: "latest"}
+	if len(cfg) > 0 {
+		c = cfg[0]
+	}
+	if c.TargetVersion == "" {
+		c.TargetVersion = "latest"
+	}
+	return &Server{store: st, bootstrap: bootstrap, client: &http.Client{Timeout: 20 * time.Second}, log: log, webDir: webDir, cfg: c, subs: make(map[string]map[chan domain.Event]struct{}), replay: auth.NewReplayGuard()}
 }
 
 func (s *Server) Handler() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /api/v1/health", s.health)
+	m.HandleFunc("GET /api/v1/system", s.system)
 	m.HandleFunc("POST /api/v1/agents/register", s.register)
 	m.HandleFunc("POST /api/v1/agents/heartbeat", s.agentAuthenticated(s.heartbeat))
 	m.HandleFunc("POST /api/v1/agent-events", s.agentAuthenticated(s.agentEvent))
@@ -49,6 +63,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("DELETE /api/v1/agents/{id}", s.deleteAgent)
 	m.HandleFunc("GET /api/v1/agents/{id}/containers", s.agentContainers)
 	m.HandleFunc("POST /api/v1/agents/{id}/refresh", s.refresh)
+	m.HandleFunc("POST /api/v1/agents/{id}/self-update", s.selfUpdate)
 	m.HandleFunc("GET /api/v1/containers", s.listContainers)
 	m.HandleFunc("GET /api/v1/containers/{id}", s.getContainer)
 	m.HandleFunc("POST /api/v1/containers/{id}/dry-run", s.action("dry-run"))
@@ -100,6 +115,19 @@ func decode(body io.Reader, v any) error {
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"status": "ok", "service": "dockpulse-control"})
+}
+
+func (s *Server) system(w http.ResponseWriter, r *http.Request) {
+	agents, err := s.store.Agents(r.Context())
+	if err != nil {
+		problem(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"version":        s.cfg.Version,
+		"target_version": s.cfg.TargetVersion,
+		"agents":         agents,
+	})
 }
 
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
@@ -327,6 +355,59 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, inv)
+}
+
+func (s *Server) selfUpdate(w http.ResponseWriter, r *http.Request) {
+	a, err := s.store.Agent(r.Context(), r.PathValue("id"))
+	if err != nil {
+		problem(w, 404, "agent not found")
+		return
+	}
+	if a.Status == "offline" {
+		problem(w, 409, "agent is offline")
+		return
+	}
+	if a.ReadOnly {
+		problem(w, 409, "agent is read-only")
+		return
+	}
+	var in struct {
+		Confirm       bool   `json:"confirm"`
+		TargetVersion string `json:"target_version"`
+	}
+	if err := decode(r.Body, &in); err != nil && !errors.Is(err, io.EOF) {
+		problem(w, 400, err.Error())
+		return
+	}
+	if !in.Confirm {
+		problem(w, 400, "explicit confirmation is required")
+		return
+	}
+	if in.TargetVersion == "" {
+		in.TargetVersion = s.cfg.TargetVersion
+	}
+	j := domain.Job{ID: store.ID("job"), AgentID: a.ID, TargetKey: a.ID + ":self-update", Action: "self-update", Status: domain.StatusQueued, RequestedBy: user(r), CorrelationID: r.Header.Get(auth.HeaderRequest), CreatedAt: time.Now()}
+	if err = s.store.CreateJob(r.Context(), j); err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			problem(w, 409, "an update is already active for this target")
+			return
+		}
+		problem(w, 500, err.Error())
+		return
+	}
+	var out domain.ActionResponse
+	err = s.agentCall(r.Context(), a, "POST", "/self-update", domain.SelfUpdateRequest{ControlJobID: j.ID, TargetVersion: in.TargetVersion, Confirm: in.Confirm}, &out)
+	if err != nil {
+		_ = s.store.UpdateJob(r.Context(), j.ID, domain.StatusFailed, "", err.Error())
+		problem(w, 502, err.Error())
+		return
+	}
+	if err = s.store.SetAgentJob(r.Context(), j.ID, out.JobID); err != nil {
+		problem(w, 500, "could not persist agent job: "+err.Error())
+		return
+	}
+	j, _ = s.store.Job(r.Context(), j.ID)
+	writeJSON(w, 202, j)
 }
 
 func (s *Server) action(kind string) http.HandlerFunc {

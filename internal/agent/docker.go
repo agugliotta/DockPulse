@@ -18,14 +18,27 @@ import (
 type Runner interface {
 	Run(context.Context, ...string) ([]byte, error)
 }
+
+type EnvRunner interface {
+	Runner
+	RunWithEnv(context.Context, []string, ...string) ([]byte, error)
+}
+
 type DockerCLI struct{ Binary string }
 
 func (d DockerCLI) Run(ctx context.Context, args ...string) ([]byte, error) {
+	return d.RunWithEnv(ctx, nil, args...)
+}
+
+func (d DockerCLI) RunWithEnv(ctx context.Context, env []string, args ...string) ([]byte, error) {
 	bin := d.Binary
 	if bin == "" {
 		bin = "docker"
 	}
 	cmd := exec.CommandContext(ctx, bin, args...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

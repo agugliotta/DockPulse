@@ -21,6 +21,15 @@ type Plan struct {
 type Updater struct {
 	Docker              Runner
 	AllowedComposeRoots []string
+	SelfUpdate          SelfUpdateConfig
+}
+
+type SelfUpdateConfig struct {
+	Enabled       bool
+	Directory     string
+	Project       string
+	Service       string
+	TargetVersion string
 }
 
 func (u Updater) DryRun(ctx context.Context, req domain.ActionRequest) (Plan, error) {
@@ -66,6 +75,54 @@ func (u Updater) Execute(ctx context.Context, req domain.ActionRequest, logf fun
 		logf("info", step)
 	}
 	return u.executeRun(ctx, in, logf)
+}
+
+func (u Updater) SelfUpdatePlan(targetVersion string) (Plan, error) {
+	cfg := u.SelfUpdate
+	if !cfg.Enabled {
+		return Plan{}, fmt.Errorf("self-update is disabled; set DOCKPULSE_SELF_UPDATE_ENABLED=true on this agent")
+	}
+	if cfg.Directory == "" || cfg.Project == "" || cfg.Service == "" {
+		return Plan{}, fmt.Errorf("self-update requires DOCKPULSE_SELF_UPDATE_DIR, DOCKPULSE_SELF_UPDATE_PROJECT and DOCKPULSE_SELF_UPDATE_SERVICE")
+	}
+	if targetVersion == "" {
+		targetVersion = cfg.TargetVersion
+	}
+	if targetVersion == "" {
+		targetVersion = "latest"
+	}
+	return Plan{Target: cfg.Project + "/" + cfg.Service, Scope: "self-update", Steps: []string{"Set DOCKPULSE_VERSION=" + targetVersion + " for this Compose run", "Pull DockPulse service image: docker compose pull " + cfg.Service, "Recreate service from " + cfg.Directory + ": docker compose up -d " + cfg.Service, "The agent may briefly disconnect while the service is replaced"}, Warnings: []string{"self-update is opt-in and depends on the host Compose file using DOCKPULSE_VERSION in the image tag"}}, nil
+}
+
+func (u Updater) ExecuteSelfUpdate(ctx context.Context, targetVersion string, logf func(string, string)) error {
+	plan, err := u.SelfUpdatePlan(targetVersion)
+	if err != nil {
+		return err
+	}
+	if targetVersion == "" {
+		targetVersion = u.SelfUpdate.TargetVersion
+	}
+	if targetVersion == "" {
+		targetVersion = "latest"
+	}
+	for _, step := range plan.Steps {
+		logf("info", step)
+	}
+	cfg := u.SelfUpdate
+	base := []string{"compose", "--project-directory", cfg.Directory, "-p", cfg.Project}
+	env := []string{"DOCKPULSE_VERSION=" + targetVersion, "DOCKPULSE_UPDATE_VERSION=" + targetVersion}
+	if _, err = u.runDocker(ctx, env, append(append([]string{}, base...), "pull", cfg.Service)...); err != nil {
+		return err
+	}
+	_, err = u.runDocker(ctx, env, append(append([]string{}, base...), "up", "-d", cfg.Service)...)
+	return err
+}
+
+func (u Updater) runDocker(ctx context.Context, env []string, args ...string) ([]byte, error) {
+	if r, ok := u.Docker.(EnvRunner); ok {
+		return r.RunWithEnv(ctx, env, args...)
+	}
+	return u.Docker.Run(ctx, args...)
 }
 
 func (u Updater) inspect(ctx context.Context, id string) (inspectContainer, error) {

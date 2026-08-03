@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -82,5 +83,32 @@ func TestDockerCLIErrorRedactsEnvironment(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "top-secret") {
 		t.Fatalf("command error leaked an environment value: %v", err)
+	}
+}
+
+type recordingRunner struct {
+	envs [][]string
+	args [][]string
+}
+
+func (r *recordingRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
+	r.args = append(r.args, args)
+	return []byte(""), nil
+}
+
+func (r *recordingRunner) RunWithEnv(ctx context.Context, env []string, args ...string) ([]byte, error) {
+	r.envs = append(r.envs, append([]string{}, env...))
+	return r.Run(ctx, args...)
+}
+
+func TestSelfUpdateInjectsRequestedVersion(t *testing.T) {
+	runner := &recordingRunner{}
+	u := Updater{Docker: runner, SelfUpdate: SelfUpdateConfig{Enabled: true, Directory: "/opt/dockpulse", Project: "dockpulse-agent", Service: "agent"}}
+	if err := u.ExecuteSelfUpdate(context.Background(), "latest", func(string, string) {}); err != nil {
+		t.Fatal(err)
+	}
+	wantEnv := []string{"DOCKPULSE_VERSION=latest", "DOCKPULSE_UPDATE_VERSION=latest"}
+	if len(runner.envs) != 2 || !reflect.DeepEqual(runner.envs[0], wantEnv) || !reflect.DeepEqual(runner.envs[1], wantEnv) {
+		t.Fatalf("self-update did not inject target version: %+v", runner.envs)
 	}
 }

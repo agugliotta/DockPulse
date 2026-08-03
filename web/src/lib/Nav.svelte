@@ -4,7 +4,8 @@
     ['/', 'Overview'],
     ['/agents', 'Agents'],
     ['/containers', 'Inventory'],
-    ['/jobs', 'Activity']
+    ['/jobs', 'Activity'],
+    ['/system', 'System']
   ];
 </script>
 
@@ -20,6 +21,6 @@
       >{/each}
   </nav>
   <div class="sidebar-foot">
-    <span class="connection"><i></i> Control online</span><small>v0.1.0 · MVP</small>
+    <span class="connection"><i></i> Control online</span><small>v0.2.0 · MVP</small>
   </div>
 </aside>

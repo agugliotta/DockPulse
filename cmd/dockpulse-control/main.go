@@ -8,6 +8,7 @@ import (
 
 	"github.com/dockpulse/dockpulse/internal/control"
 	"github.com/dockpulse/dockpulse/internal/store"
+	"github.com/dockpulse/dockpulse/internal/version"
 )
 
 func main() {
@@ -26,8 +27,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer st.Close()
-	srv := &http.Server{Addr: addr, Handler: control.New(st, bootstrap, env("DOCKPULSE_WEB_DIR", "./web/build"), log).Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 0, IdleTimeout: 60 * time.Second}
-	log.Info("control_started", "addr", addr)
+	cfg := control.Config{Version: version.Current, TargetVersion: env("DOCKPULSE_UPDATE_VERSION", env("DOCKPULSE_VERSION", "latest"))}
+	srv := &http.Server{Addr: addr, Handler: control.New(st, bootstrap, env("DOCKPULSE_WEB_DIR", "./web/build"), log, cfg).Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 0, IdleTimeout: 60 * time.Second}
+	log.Info("control_started", "addr", addr, "version", cfg.Version, "target_version", cfg.TargetVersion)
 	if err = srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Error("server_stopped", "error", err)
 		os.Exit(1)

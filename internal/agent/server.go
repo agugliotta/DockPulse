@@ -58,6 +58,7 @@ func (a *Agent) Handler() http.Handler {
 	m.HandleFunc("POST /refresh", a.authed(a.refresh))
 	m.HandleFunc("POST /dry-run", a.authed(a.dryRun))
 	m.HandleFunc("POST /update", a.authed(a.update))
+	m.HandleFunc("POST /self-update", a.authed(a.selfUpdate))
 	m.HandleFunc("GET /jobs/{id}", a.authed(a.getJob))
 	m.HandleFunc("GET /jobs/{id}/logs", a.authed(a.getLogs))
 	return m
@@ -166,6 +167,39 @@ func (a *Agent) update(w http.ResponseWriter, r *http.Request, body []byte) {
 	go a.execute(id, req)
 	agentJSON(w, 202, domain.ActionResponse{JobID: id})
 }
+
+func (a *Agent) selfUpdate(w http.ResponseWriter, r *http.Request, body []byte) {
+	if a.cfg.ReadOnly {
+		agentProblem(w, 409, "agent is read-only")
+		return
+	}
+	var req domain.SelfUpdateRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		agentProblem(w, 400, err.Error())
+		return
+	}
+	if !req.Confirm {
+		agentProblem(w, 400, "explicit confirmation required")
+		return
+	}
+	if req.ControlJobID == "" {
+		agentProblem(w, 400, "control_job_id is required")
+		return
+	}
+	if _, err := a.updater.SelfUpdatePlan(req.TargetVersion); err != nil {
+		agentProblem(w, 409, err.Error())
+		return
+	}
+	id := store.ID("agentjob")
+	j := domain.Job{ID: id, Action: "self-update", Status: domain.StatusQueued, CreatedAt: time.Now()}
+	a.mu.Lock()
+	a.jobs[id] = &localJob{Job: j}
+	a.pruneJobsLocked()
+	a.mu.Unlock()
+	go a.executeSelfUpdate(id, req)
+	agentJSON(w, 202, domain.ActionResponse{JobID: id})
+}
+
 func (a *Agent) execute(id string, req domain.ActionRequest) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
@@ -200,6 +234,34 @@ func (a *Agent) execute(id string, req domain.ActionRequest) {
 		a.mu.Unlock()
 		_ = a.sendHeartbeat(refreshCtx, &inv)
 	}
+}
+
+func (a *Agent) executeSelfUpdate(id string, req domain.SelfUpdateRequest) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+	now := time.Now()
+	a.mu.Lock()
+	a.jobs[id].Job.Status = domain.StatusRunning
+	a.jobs[id].Job.StartedAt = &now
+	a.mu.Unlock()
+	a.emit(req.ControlJobID, id, "info", "self-update started", domain.StatusRunning, "", "")
+	err := a.updater.ExecuteSelfUpdate(ctx, req.TargetVersion, func(level, msg string) { a.emit(req.ControlJobID, id, level, msg, "", "", "") })
+	status := domain.StatusSucceeded
+	errText := ""
+	if err != nil {
+		status = domain.StatusFailed
+		errText = err.Error()
+		a.emit(req.ControlJobID, id, "error", errText, "", "", "")
+	} else {
+		a.emit(req.ControlJobID, id, "info", "self-update command completed", "", "", "")
+	}
+	finished := time.Now()
+	a.mu.Lock()
+	a.jobs[id].Job.Status = status
+	a.jobs[id].Job.Error = errText
+	a.jobs[id].Job.FinishedAt = &finished
+	a.mu.Unlock()
+	a.emit(req.ControlJobID, id, "", "", status, "", errText)
 }
 func (a *Agent) emit(controlID, localID, level, msg, status, plan, errText string) {
 	if msg != "" {

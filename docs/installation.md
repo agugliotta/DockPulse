@@ -101,7 +101,8 @@ openssl rand -hex 32
 Editar `deploy/control.env` y asignar:
 
 ```dotenv
-DOCKPULSE_VERSION=0.1.0
+DOCKPULSE_VERSION=0.2.0
+DOCKPULSE_UPDATE_VERSION=latest
 DOCKPULSE_ENCRYPTION_KEY=<PRIMERA_SALIDA_BASE64>
 DOCKPULSE_BOOTSTRAP_TOKEN=<SEGUNDA_SALIDA_HEX>
 DOCKPULSE_CONTROL_PORT=8080
@@ -111,6 +112,8 @@ Responsabilidad de cada secreto:
 
 - `DOCKPULSE_ENCRYPTION_KEY` cifra en SQLite los secrets de Agents. Guardar una copia segura fuera del LXC.
 - `DOCKPULSE_BOOTSTRAP_TOKEN` permite registrar Agents. Los Agents deben usar el mismo valor.
+- `DOCKPULSE_VERSION` puede quedar fijado a `0.2.0` o apuntar a `latest`.
+- `DOCKPULSE_UPDATE_VERSION` es el target que muestra **System** para operaciones de actualización.
 
 No reemplazar la encryption key sobre una base existente: el Server dejaría de poder descifrar los secrets almacenados.
 
@@ -224,7 +227,8 @@ openssl rand -hex 32
 Editar `deploy/agent.env`. Ejemplo para el LXC `10.10.0.101`:
 
 ```dotenv
-DOCKPULSE_VERSION=0.1.0
+DOCKPULSE_VERSION=0.2.0
+DOCKPULSE_UPDATE_VERSION=latest
 DOCKPULSE_AGENT_ID=lxc-101
 DOCKPULSE_AGENT_NAME=docker-lxc-101
 DOCKPULSE_AGENT_URL=http://10.10.0.101:9090
@@ -237,7 +241,24 @@ DOCKPULSE_AGENT_PORT=9090
 DOCKPULSE_COMPOSE_ROOTS=/opt/stacks,/srv/compose
 DOCKPULSE_COMPOSE_ROOT_1=/opt/stacks
 DOCKPULSE_COMPOSE_ROOT_2=/srv/compose
+DOCKPULSE_SELF_UPDATE_ENABLED=false
+DOCKPULSE_SELF_UPDATE_DIR=/opt/dockpulse
+DOCKPULSE_SELF_UPDATE_PROJECT=dockpulse-agent
+DOCKPULSE_SELF_UPDATE_SERVICE=agent
 ```
+
+Para que un Agent pueda actualizarse a sí mismo desde **System**, cambiar `DOCKPULSE_READ_ONLY=false` y `DOCKPULSE_SELF_UPDATE_ENABLED=true`. El Compose file debe estar disponible dentro del contenedor en `DOCKPULSE_SELF_UPDATE_DIR`; el ejemplo monta `/opt/dockpulse` en modo read-only, suficiente para ejecutar `docker compose pull` y `docker compose up -d`.
+
+Para auto-actualizar el Server, instalar también un Agent en el LXC central del Server y configurar su self-update apuntando al Compose del control plane:
+
+```dotenv
+DOCKPULSE_SELF_UPDATE_ENABLED=true
+DOCKPULSE_SELF_UPDATE_DIR=/opt/dockpulse
+DOCKPULSE_SELF_UPDATE_PROJECT=dockpulse-control
+DOCKPULSE_SELF_UPDATE_SERVICE=dockpulse-control
+```
+
+Ese Agent central es quien accede al Docker socket local del LXC Server; el control plane sigue sin montar sockets Docker.
 
 Reglas de identidad:
 
@@ -472,7 +493,7 @@ Verificar heartbeat, inventario y dry-run antes de continuar con el siguiente Ag
 
 | Variable                    | Requerida | Default          | Descripción                                     |
 | --------------------------- | --------- | ---------------- | ----------------------------------------------- |
-| `DOCKPULSE_VERSION`         | No        | `0.1.0`          | Tag inmutable de la imagen de DockPulse         |
+| `DOCKPULSE_VERSION`         | No        | `0.2.0`          | Tag inmutable de la imagen de DockPulse         |
 | `DOCKPULSE_ENCRYPTION_KEY`  | Sí        | —                | Clave Base64 de 32 bytes para AES-256-GCM       |
 | `DOCKPULSE_BOOTSTRAP_TOKEN` | Sí        | —                | Token compartido para registrar Agents          |
 | `DOCKPULSE_LISTEN_ADDR`     | No        | `:8080`          | Bind interno del proceso                        |
@@ -484,7 +505,7 @@ Verificar heartbeat, inventario y dry-run antes de continuar con el siguiente Ag
 
 | Variable                      | Requerida | Default                    | Descripción                                 |
 | ----------------------------- | --------- | -------------------------- | ------------------------------------------- |
-| `DOCKPULSE_VERSION`           | No        | `0.1.0`                    | Tag inmutable de la imagen de DockPulse     |
+| `DOCKPULSE_VERSION`           | No        | `0.2.0`                    | Tag inmutable de la imagen de DockPulse     |
 | `DOCKPULSE_AGENT_ID`          | Sí        | —                          | ID estable y único del Docker LXC           |
 | `DOCKPULSE_AGENT_NAME`        | Sí        | —                          | Nombre visible único                        |
 | `DOCKPULSE_AGENT_URL`         | Sí        | —                          | URL alcanzable desde el Server              |

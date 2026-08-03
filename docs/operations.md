@@ -48,6 +48,31 @@ El agente consulta `Docker-Content-Digest` del manifest asociado a la referencia
 - Registries privados con autenticación no forman parte del MVP.
 - Un cambio de digest puede incluir una reconstrucción del mismo tag; revisar release notes de la imagen fuera de DockPulse.
 
+## Versiones y self-update
+
+La vista **System** muestra:
+
+- versión actual del control plane, tomada del binario en ejecución;
+- versión actual de cada Agent, reportada por heartbeat;
+- target configurado en `DOCKPULSE_UPDATE_VERSION`.
+
+Si `DOCKPULSE_VERSION=latest`, Docker resuelve el digest exacto durante `docker compose pull`; DockPulse muestra el tag objetivo, no predice el digest antes del pull.
+
+El self-update de Agents es opt-in. Requiere:
+
+- `DOCKPULSE_READ_ONLY=false`;
+- `DOCKPULSE_SELF_UPDATE_ENABLED=true`;
+- `DOCKPULSE_SELF_UPDATE_DIR`, `DOCKPULSE_SELF_UPDATE_PROJECT` y `DOCKPULSE_SELF_UPDATE_SERVICE` apuntando al Compose que ejecuta ese Agent.
+
+Desde **System**, el botón **Self-update** crea un job auditable y el Agent ejecuta:
+
+```text
+docker compose --project-directory <dir> -p <project> pull <service>
+docker compose --project-directory <dir> -p <project> up -d <service>
+```
+
+Para actualizar el Server con el mismo flujo, debe existir un Agent local en el LXC del Server configurado contra el servicio `dockpulse-control`. El Server por sí mismo no toca Docker.
+
 ## Políticas y labels
 
 ### Docker run
@@ -187,6 +212,8 @@ Endpoints principales:
 | `GET /agents`, `GET /agents/:id`                                    | fleet                                                            |
 | `DELETE /agents/:id?confirm=true`                                   | desregistro explícito; el historial referenciado puede impedirlo |
 | `POST /agents/:id/refresh`                                          | refresh y evaluación                                             |
+| `POST /agents/:id/self-update`                                      | self-update opt-in del Agent                                     |
+| `GET /system`                                                       | versión actual, target y Agents                                  |
 | `GET /agents/:id/containers`                                        | inventario por agente                                            |
 | `GET /containers`, `GET /containers/:id`                            | inventario global/detalle                                        |
 | `POST /containers/:id/dry-run`                                      | plan validado                                                    |

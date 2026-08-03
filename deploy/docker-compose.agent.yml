@@ -1,7 +1,7 @@
 name: dockpulse-agent
 services:
   agent:
-    image: ghcr.io/agugliotta/dockpulse-agent:${DOCKPULSE_VERSION:-0.1.0}
+    image: ghcr.io/agugliotta/dockpulse-agent:${DOCKPULSE_VERSION:-latest}
     restart: unless-stopped
     environment:
       DOCKPULSE_AGENT_ID: ${DOCKPULSE_AGENT_ID:?set in the agent env file}
@@ -13,10 +13,17 @@ services:
       DOCKPULSE_READ_ONLY: ${DOCKPULSE_READ_ONLY:-true}
       DOCKPULSE_AGENT_LISTEN_ADDR: ${DOCKPULSE_AGENT_LISTEN_ADDR:-:9090}
       DOCKPULSE_COMPOSE_ROOTS: ${DOCKPULSE_COMPOSE_ROOTS:-/opt/stacks,/srv/compose}
+      DOCKPULSE_VERSION: ${DOCKPULSE_VERSION:-latest}
+      DOCKPULSE_UPDATE_VERSION: ${DOCKPULSE_UPDATE_VERSION:-latest}
+      DOCKPULSE_SELF_UPDATE_ENABLED: ${DOCKPULSE_SELF_UPDATE_ENABLED:-false}
+      DOCKPULSE_SELF_UPDATE_DIR: ${DOCKPULSE_SELF_UPDATE_DIR:-/opt/dockpulse}
+      DOCKPULSE_SELF_UPDATE_PROJECT: ${DOCKPULSE_SELF_UPDATE_PROJECT:-dockpulse-agent}
+      DOCKPULSE_SELF_UPDATE_SERVICE: ${DOCKPULSE_SELF_UPDATE_SERVICE:-agent}
     ports:
       - "${DOCKPULSE_AGENT_PORT:-9090}:9090"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ${DOCKPULSE_SELF_UPDATE_DIR:-/opt/dockpulse}:${DOCKPULSE_SELF_UPDATE_DIR:-/opt/dockpulse}:ro
       - ${DOCKPULSE_COMPOSE_ROOT_1:-/opt/stacks}:${DOCKPULSE_COMPOSE_ROOT_1:-/opt/stacks}:ro
       - ${DOCKPULSE_COMPOSE_ROOT_2:-/srv/compose}:${DOCKPULSE_COMPOSE_ROOT_2:-/srv/compose}:ro
     security_opt:

@@ -61,6 +61,7 @@ jobs:
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --label "org.opencontainers.image.version=$VERSION" \
             --tag "$CONTROL_IMAGE:$VERSION" \
+            --tag "$CONTROL_IMAGE:latest" \
             --tag "$CONTROL_IMAGE:sha-$SHORT_SHA" \
             .
 
@@ -70,6 +71,7 @@ jobs:
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --label "org.opencontainers.image.version=$VERSION" \
             --tag "$AGENT_IMAGE:$VERSION" \
+            --tag "$AGENT_IMAGE:latest" \
             --tag "$AGENT_IMAGE:sha-$SHORT_SHA" \
             .
 
@@ -79,8 +81,10 @@ jobs:
           SHORT_SHA: ${{ steps.release.outputs.short_sha }}
         run: |
           docker push "$CONTROL_IMAGE:$VERSION"
+          docker push "$CONTROL_IMAGE:latest"
           docker push "$CONTROL_IMAGE:sha-$SHORT_SHA"
           docker push "$AGENT_IMAGE:$VERSION"
+          docker push "$AGENT_IMAGE:latest"
           docker push "$AGENT_IMAGE:sha-$SHORT_SHA"
 
       - name: Publish summary
@@ -91,7 +95,9 @@ jobs:
             echo "## DockPulse $VERSION"
             echo
             echo "- \`$CONTROL_IMAGE:$VERSION\`"
+            echo "- \`$CONTROL_IMAGE:latest\`"
             echo "- \`$AGENT_IMAGE:$VERSION\`"
+            echo "- \`$AGENT_IMAGE:latest\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Log out from GHCR

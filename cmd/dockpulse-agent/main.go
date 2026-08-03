@@ -11,9 +11,8 @@ import (
 	"time"
 
 	"github.com/dockpulse/dockpulse/internal/agent"
+	"github.com/dockpulse/dockpulse/internal/version"
 )
-
-const version = "0.1.0"
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -30,8 +29,8 @@ func main() {
 	}
 	runner := agent.DockerCLI{Binary: env("DOCKPULSE_DOCKER_BINARY", "docker")}
 	roots := strings.Split(env("DOCKPULSE_COMPOSE_ROOTS", "/opt/stacks,/srv/compose"), ",")
-	cfg := agent.Config{ID: os.Getenv("DOCKPULSE_AGENT_ID"), Name: os.Getenv("DOCKPULSE_AGENT_NAME"), BaseURL: os.Getenv("DOCKPULSE_AGENT_URL"), Secret: os.Getenv("DOCKPULSE_AGENT_SECRET"), ControlURL: os.Getenv("DOCKPULSE_CONTROL_URL"), BootstrapToken: os.Getenv("DOCKPULSE_BOOTSTRAP_TOKEN"), Version: version, ReadOnly: env("DOCKPULSE_READ_ONLY", "true") == "true"}
-	a := agent.New(cfg, agent.Discovery{Docker: runner, Registry: agent.NewRegistryClient(), AllowedComposeRoots: roots}, agent.Updater{Docker: runner, AllowedComposeRoots: roots}, log)
+	cfg := agent.Config{ID: os.Getenv("DOCKPULSE_AGENT_ID"), Name: os.Getenv("DOCKPULSE_AGENT_NAME"), BaseURL: os.Getenv("DOCKPULSE_AGENT_URL"), Secret: os.Getenv("DOCKPULSE_AGENT_SECRET"), ControlURL: os.Getenv("DOCKPULSE_CONTROL_URL"), BootstrapToken: os.Getenv("DOCKPULSE_BOOTSTRAP_TOKEN"), Version: version.Current, ReadOnly: env("DOCKPULSE_READ_ONLY", "true") == "true"}
+	a := agent.New(cfg, agent.Discovery{Docker: runner, Registry: agent.NewRegistryClient(), AllowedComposeRoots: roots}, agent.Updater{Docker: runner, AllowedComposeRoots: roots, SelfUpdate: agent.SelfUpdateConfig{Enabled: env("DOCKPULSE_SELF_UPDATE_ENABLED", "false") == "true", Project: os.Getenv("DOCKPULSE_SELF_UPDATE_PROJECT"), Service: os.Getenv("DOCKPULSE_SELF_UPDATE_SERVICE"), Directory: os.Getenv("DOCKPULSE_SELF_UPDATE_DIR"), TargetVersion: env("DOCKPULSE_UPDATE_VERSION", env("DOCKPULSE_VERSION", "latest"))}}, log)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 	go a.RunControlLoop(ctx)

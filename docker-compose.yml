@@ -6,11 +6,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.control
-    image: dockpulse/control:0.1.0
+    image: dockpulse/control:${DOCKPULSE_VERSION:-latest}
     restart: unless-stopped
     environment:
       DOCKPULSE_ENCRYPTION_KEY: ${DOCKPULSE_ENCRYPTION_KEY:?set in .env}
       DOCKPULSE_BOOTSTRAP_TOKEN: ${DOCKPULSE_BOOTSTRAP_TOKEN:?set in .env}
+      DOCKPULSE_VERSION: ${DOCKPULSE_VERSION:-latest}
+      DOCKPULSE_UPDATE_VERSION: ${DOCKPULSE_UPDATE_VERSION:-latest}
     ports:
       - "${DOCKPULSE_CONTROL_PORT:-8080}:8080"
     volumes:
@@ -29,7 +31,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.agent
-    image: dockpulse/agent:0.1.0
+    image: dockpulse/agent:${DOCKPULSE_VERSION:-latest}
     restart: unless-stopped
     depends_on:
       dockpulse-control:
@@ -43,8 +45,15 @@ services:
       DOCKPULSE_BOOTSTRAP_TOKEN: ${DOCKPULSE_BOOTSTRAP_TOKEN:?set in .env}
       DOCKPULSE_READ_ONLY: ${DOCKPULSE_READ_ONLY:-true}
       DOCKPULSE_COMPOSE_ROOTS: ${DOCKPULSE_COMPOSE_ROOTS:-/opt/stacks,/srv/compose}
+      DOCKPULSE_VERSION: ${DOCKPULSE_VERSION:-latest}
+      DOCKPULSE_UPDATE_VERSION: ${DOCKPULSE_UPDATE_VERSION:-latest}
+      DOCKPULSE_SELF_UPDATE_ENABLED: ${DOCKPULSE_SELF_UPDATE_ENABLED:-false}
+      DOCKPULSE_SELF_UPDATE_DIR: ${DOCKPULSE_SELF_UPDATE_DIR:-/workspace}
+      DOCKPULSE_SELF_UPDATE_PROJECT: ${DOCKPULSE_SELF_UPDATE_PROJECT:-dockpulse}
+      DOCKPULSE_SELF_UPDATE_SERVICE: ${DOCKPULSE_SELF_UPDATE_SERVICE:-dockpulse-agent}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - .:/workspace:ro
       - ${DOCKPULSE_STACKS_PATH:-./examples/stacks}:/opt/stacks:ro
       - ${DOCKPULSE_COMPOSE_PATH:-./examples/compose}:/srv/compose:ro
     security_opt:
