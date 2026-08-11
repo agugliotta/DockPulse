@@ -57,6 +57,7 @@ jobs:
 
           docker build --pull --platform linux/amd64 \
             --file Dockerfile.control \
+            --build-arg VERSION="$VERSION" \
             --label "org.opencontainers.image.source=$source_url" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --label "org.opencontainers.image.version=$VERSION" \
@@ -67,6 +68,7 @@ jobs:
 
           docker build --pull --platform linux/amd64 \
             --file Dockerfile.agent \
+            --build-arg VERSION="$VERSION" \
             --label "org.opencontainers.image.source=$source_url" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --label "org.opencontainers.image.version=$VERSION" \
