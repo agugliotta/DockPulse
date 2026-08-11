@@ -87,13 +87,13 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const short = (v?: string) => (v ? v.replace('sha256:', '').slice(0, 12) : '—');
 export const imageVersion = (c: Container) => c.tag || c.image.split(':').at(-1) || 'latest';
 export const jobActionLabel = (action: string) => {
-  if (action === 'dry-run') return 'Inspection';
+  if (action === 'dry-run') return 'Preview';
   if (action === 'self-update') return 'Self-update';
   if (action === 'update') return 'Update';
   return action;
 };
 export const jobActionDescription = (action: string) => {
-  if (action === 'dry-run') return 'Validation only. Docker was not changed.';
+  if (action === 'dry-run') return 'Preview only. Docker was not changed.';
   if (action === 'self-update') return 'DockPulse agent release update.';
   if (action === 'update') return 'Docker workload update.';
   return 'Control-plane job.';

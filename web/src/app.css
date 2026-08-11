@@ -519,12 +519,12 @@ tbody tr:hover {
   display: grid;
   gap: 14px;
 }
-.readiness-flow {
+.readiness-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
-.readiness-flow div {
+.readiness-summary div {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #091518;
@@ -532,11 +532,11 @@ tbody tr:hover {
   display: grid;
   gap: 4px;
 }
-.readiness-flow div.ready {
+.readiness-summary div.ready {
   border-color: #285143;
   background: #0c241c;
 }
-.readiness-flow span {
+.readiness-summary strong {
   width: 24px;
   height: 24px;
   display: grid;
@@ -544,15 +544,106 @@ tbody tr:hover {
   border-radius: 50%;
   background: #13262a;
   color: #9eb2b5;
-  font: 700 12px 'JetBrains Mono';
+  font-size: 12px;
+  font-family: 'JetBrains Mono';
+  letter-spacing: 0.3px;
 }
-.readiness-flow strong {
-  color: var(--bright);
+.readiness-summary span {
+  color: #dce7e8;
   font-size: 14px;
+  font-weight: 600;
 }
-.readiness-flow small {
+.readiness-summary small {
   color: #70878c;
   font-size: 12px;
+}
+.readiness-note {
+  display: grid;
+  gap: 8px;
+}
+.tech-fold {
+  border-top: 1px solid #192d30;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+.tech-fold > summary {
+  cursor: pointer;
+  color: #9db0b3;
+  font: 600 12px 'JetBrains Mono';
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+.tech-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.tech-grid div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #091518;
+  padding: 12px;
+  display: grid;
+  gap: 4px;
+}
+.tech-grid span {
+  color: #70878c;
+  font: 600 10px 'JetBrains Mono';
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.tech-grid strong {
+  color: var(--bright);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.tech-grid small {
+  color: #607a80;
+  font-size: 12px;
+}
+.readiness-board {
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+}
+.readiness-note .callout {
+  margin: 0;
+}
+.menu {
+  position: relative;
+}
+.menu > summary.btn {
+  list-style: none;
+}
+.menu > summary.btn::-webkit-details-marker {
+  display: none;
+}
+.menu[open] > summary.btn {
+  border-color: #46646a;
+  background: #15292d;
+}
+.menu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 220px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  background: #0e1c1f;
+  border: 1px solid #2b4449;
+  border-radius: 12px;
+  box-shadow: 0 20px 48px #00000080;
+  z-index: 5;
+}
+.menu-panel .btn {
+  width: 100%;
+  justify-content: flex-start;
+}
+.menu-panel .btn.primary,
+.menu-panel .btn.danger {
+  justify-content: flex-start;
 }
 .checklist {
   display: grid;
@@ -587,6 +678,33 @@ tbody tr:hover {
   font-size: 13px;
 }
 .operation-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.dry-run-panel {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  display: grid;
+  gap: 14px;
+}
+.dry-run-head {
+  min-height: 0;
+  padding: 0;
+  border-bottom: 0;
+}
+.dry-run-head h3 {
+  margin: 0;
+  color: #d9e5e6;
+  font-size: 15px;
+}
+.dry-run-head span {
+  display: block;
+  margin-top: 3px;
+  color: #70878c;
+  font-size: 12px;
+}
+.dry-run-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -661,33 +779,6 @@ tbody tr:hover {
   border-color: #633238;
   background: #261416;
   color: #f0a4a4;
-}
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: #020708bd;
-  display: grid;
-  place-items: center;
-  z-index: 20;
-  padding: 20px;
-}
-.modal {
-  width: min(620px, 100%);
-  max-height: 86vh;
-  overflow: auto;
-  background: #0e1c1f;
-  border: 1px solid #2b4449;
-  border-radius: 14px;
-  box-shadow: 0 20px 80px #000;
-  padding: 22px;
-}
-.modal h2 {
-  margin: 0 0 8px;
-  color: var(--bright);
-}
-.modal p {
-  font-size: 14px;
-  color: var(--muted);
 }
 pre {
   white-space: pre-wrap;
@@ -797,5 +888,28 @@ pre {
   }
   .detail-list dd {
     padding-top: 0;
+  }
+  .readiness-summary {
+    grid-template-columns: 1fr;
+  }
+  .tech-grid {
+    grid-template-columns: 1fr;
+  }
+  .menu {
+    width: 100%;
+  }
+  .menu-panel {
+    position: static;
+    min-width: 0;
+    margin-top: 8px;
+  }
+  .operation-actions {
+    flex-direction: column;
+  }
+  .operation-actions .btn,
+  .operation-actions select,
+  .dry-run-actions .btn,
+  .readiness-panel .menu {
+    width: 100%;
   }
 }

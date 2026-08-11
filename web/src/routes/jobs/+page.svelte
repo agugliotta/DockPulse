@@ -22,7 +22,7 @@
     <div>
       <span class="eyebrow">Audit trail</span>
       <h1>Activity</h1>
-      <p>Inspections, update executions, actors and results in one timeline.</p>
+      <p>Previews, update executions, actors and results in one timeline.</p>
     </div>
   </header>
   {#if error}<div class="callout errorbox">{error}</div>{/if}

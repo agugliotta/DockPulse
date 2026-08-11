@@ -47,7 +47,7 @@
 <section class="page">
   {#if job}<header class="page-head">
       <div>
-        <span class="eyebrow">{job.action === 'dry-run' ? 'Inspection detail' : 'Execution detail'}</span>
+        <span class="eyebrow">{job.action === 'dry-run' ? 'Preview detail' : 'Execution detail'}</span>
         <h1>{jobActionLabel(job.action)} <span class="mono">{job.id}</span></h1>
         <p>
           {job.target_key} · {jobActionDescription(job.action)} · requested {since(job.created_at)} by {job.requested_by}
@@ -60,13 +60,12 @@
         style="margin-bottom:16px"
       >
         <div class="panel-head">
-          <h2>Dry-run inspection</h2>
-          <span>This is the plan DockPulse would execute after confirmation</span>
+          <h2>Preview snapshot</h2>
+          <span>This is the plan DockPulse would execute if you run Update now</span>
         </div>
         <div style="padding:16px">
           <div class="callout">
-            No Docker changes were made. This result is saved for audit so you can review it before running
-            Update now.
+            No Docker changes were made. This result is saved for audit, but it does not gate Update now.
           </div>
           {#if plan}
             <div class="plan">
@@ -94,7 +93,7 @@
           <h2>Execution log</h2>
           <span
             >{job.action === 'dry-run'
-              ? 'Validation result'
+              ? 'Preview result'
               : `SSE live stream · correlation ${job.correlation_id || 'n/a'}`}</span
           >
         </div>
@@ -106,7 +105,7 @@
             ><span>{e.message}</span>
           </div>{:else}<div>
             {job.action === 'dry-run'
-              ? 'Dry-run completed. Live execution logs only appear when you run Update now.'
+              ? 'Preview completed. Live execution logs only appear when you run Update now.'
               : 'Waiting for agent events...'}
           </div>{/each}
       </div>

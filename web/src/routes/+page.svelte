@@ -34,6 +34,7 @@
   onMount(load);
   const updates = $derived(containers.filter((c) => c.update_available && !c.ignored));
   const agentIssues = $derived(agents.filter((a) => a.status !== 'healthy' || a.read_only));
+  const readyAgents = $derived(agents.filter((a) => a.status === 'healthy' && !a.read_only));
   const changeJobs = $derived(jobs.filter((j) => j.action !== 'dry-run'));
   const inspectionJobs = $derived(jobs.filter((j) => j.action === 'dry-run'));
   const online = $derived(agents.filter((a) => a.status === 'healthy').length);
@@ -121,28 +122,53 @@
         </div>
         <a href="/agents" class="btn">All agents</a>
       </div>
-      <ul class="activity">
-        {#each agentIssues.slice(0, 8) as agent}<li>
-            <i
-              class:success={agent.status === 'healthy' && !agent.read_only}
-              class:failure={agent.status === 'offline'}
-            ></i>
-            <div>
-              <a href={`/agents/${agent.id}`}><strong>{agent.name}</strong></a><small
-                >{agent.status} · {agent.read_only ? 'read-only' : 'writable'} · heartbeat {since(
-                  agent.last_heartbeat
-                )}</small
-              >
-            </div>
-          </li>{:else}<li><div>All agents are healthy and writable.</div></li>{/each}
-      </ul>
+      <div class="readiness-board">
+        <div class="readiness-summary">
+          <div class:ready={readyAgents.length === agents.length && agents.length > 0}>
+            <strong>{readyAgents.length}</strong>
+            <span>Ready</span>
+            <small>Healthy and writable</small>
+          </div>
+          <div class:ready={agentIssues.length > 0}>
+            <strong>{agentIssues.length}</strong>
+            <span>Attention</span>
+            <small>{agentIssues.length === 0 ? 'No blockers' : 'Need review'}</small>
+          </div>
+          <div class:ready={online === agents.length && agents.length > 0}>
+            <strong>{online}</strong>
+            <span>Online</span>
+            <small>Heartbeat observed</small>
+          </div>
+        </div>
+        {#if agentIssues.length}
+          <ul class="activity compact">
+            {#each agentIssues.slice(0, 6) as agent}
+              <li>
+                <i
+                  class:success={agent.status === 'healthy' && !agent.read_only}
+                  class:failure={agent.status === 'offline'}
+                ></i>
+                <div>
+                  <a href={`/agents/${agent.id}`}><strong>{agent.name}</strong></a><small
+                    >{agent.status} · {agent.read_only ? 'read-only' : 'writable'} · heartbeat {since(
+                      agent.last_heartbeat
+                    )}</small
+                  >
+                </div>
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <div class="callout">All agents are healthy and writable.</div>
+        {/if}
+      </div>
     </section>
   </div>
   <section class="panel" style="margin-top:16px">
     <div class="panel-head">
       <div>
         <h2>Recent activity</h2>
-        <span>Updates and self-updates first; dry-runs are listed as inspections</span>
+        <span>Updates and self-updates first; previews are listed separately</span>
       </div>
       <a href="/jobs" class="btn">All activity</a>
     </div>
@@ -160,16 +186,16 @@
         </ul>
       </div>
       <div>
-        <h3>Inspections</h3>
+        <h3>Previews</h3>
         <ul class="activity compact">
           {#each inspectionJobs.slice(0, 4) as j}<li>
               <i class="inspection"></i>
               <div>
-                <a href={`/jobs/${j.id}`}><strong>Dry-run · {jobTarget(j)}</strong></a><small
+                <a href={`/jobs/${j.id}`}><strong>Preview · {jobTarget(j)}</strong></a><small
                   >{since(j.created_at)} · no Docker changes</small
                 >
               </div>
-            </li>{:else}<li><div>No dry-run inspections yet.</div></li>{/each}
+            </li>{:else}<li><div>No preview jobs yet.</div></li>{/each}
         </ul>
       </div>
     </div>

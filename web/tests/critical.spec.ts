@@ -64,14 +64,16 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('operator sees fleet posture and can inspect a dry-run', async ({ page }) => {
+test('operator sees fleet posture and can preview changes without blocking update', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'System overview' })).toBeVisible();
   const workload = page.getByRole('link', { name: 'immich-server' });
   await expect(workload).toBeVisible();
   await workload.click();
   await expect(page.getByRole('heading', { name: 'immich-server' })).toBeVisible();
-  await page.getByRole('button', { name: 'Inspect dry run' }).click();
-  await expect(page.getByRole('heading', { name: 'Dry-run plan' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Update now' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Preview changes' }).click();
+  await expect(page.getByRole('heading', { name: 'Preview changes' })).toBeVisible();
   await expect(page.getByText('Reconcile Compose service')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Update now' })).toBeEnabled();
 });

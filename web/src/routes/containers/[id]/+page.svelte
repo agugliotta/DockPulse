@@ -2,29 +2,35 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
-  import {
-    api,
-    imageVersion,
-    parsePlan,
-    short,
-    since,
-    type Container,
-    type Job,
-    type UpdatePreflight
-  } from '$lib/api';
+  import { api, parsePlan, short, since, type Container, type Job, type UpdatePreflight } from '$lib/api';
   import Status from '$lib/Status.svelte';
   let item = $state<Container | null>(null);
   let preflight = $state<UpdatePreflight | null>(null);
   let loading = $state(true);
   let error = $state('');
-  let modal = $state('');
-  let modalText = $state('');
   let scope = $state('service');
   let dryRunPlan = $state<ReturnType<typeof parsePlan>>(null);
+  let dryRunText = $state('');
   let dryRunScope = $state('');
-  const dryRunReviewed = $derived(Boolean(dryRunPlan && dryRunScope === scope));
-  const updateReady = $derived(Boolean(preflight?.can_update && dryRunReviewed));
+  let dryRunOpen = $state(false);
+  const previewSeen = $derived(Boolean((dryRunPlan || dryRunText) && dryRunScope === scope));
+  const updateReady = $derived(Boolean(preflight?.can_update));
   const blockers = $derived(preflight?.checks.filter((check) => check.status === 'block') ?? []);
+  const updateState = $derived(
+    !preflight ? 'loading' : !preflight.can_update ? 'preflight-blocked' : 'ready'
+  );
+  const updateHint = $derived(
+    updateState === 'ready'
+      ? 'Preflight passed. Update is ready for the selected scope.'
+      : blockers.length
+        ? blockers[0].message
+        : 'Preflight still blocks this update.'
+  );
+  const previewHint = $derived(
+    previewSeen
+      ? 'Preview is advisory. Runtime conditions can still change before the update runs.'
+      : 'Preview changes is optional. It does not gate Update now.'
+  );
   async function load() {
     loading = true;
     try {
@@ -32,7 +38,9 @@
       item = loaded;
       scope = loaded.management_kind === 'compose' ? 'service' : 'container';
       dryRunPlan = null;
+      dryRunText = '';
       dryRunScope = '';
+      dryRunOpen = false;
       await loadPreflight(scope);
     } catch (e) {
       error = (e as Error).message;
@@ -48,7 +56,9 @@
   async function changeScope(nextScope: string) {
     scope = nextScope;
     dryRunPlan = null;
+    dryRunText = '';
     dryRunScope = '';
+    dryRunOpen = false;
     error = '';
     try {
       await loadPreflight(nextScope);
@@ -89,10 +99,10 @@
         method: 'POST',
         body: JSON.stringify({ scope })
       });
-      modal = 'Dry-run plan';
-      modalText = j.dry_run_plan || 'Plan accepted';
+      dryRunText = j.dry_run_plan || 'Plan accepted';
       dryRunPlan = parsePlan(j.dry_run_plan);
       dryRunScope = scope;
+      dryRunOpen = true;
       await loadPreflight(scope);
     } catch (e) {
       error = (e as Error).message;
@@ -102,10 +112,6 @@
   }
   async function update() {
     if (!updateReady) {
-      modal = 'Update not ready';
-      modalText = blockers.length
-        ? blockers.map((check) => `${check.label}: ${check.message}`).join('\n')
-        : 'Run and review Inspect dry run before confirming this update.';
       return;
     }
     loading = true;
@@ -118,7 +124,6 @@
       await goto(`/jobs/${j.id}`);
     } catch (e) {
       error = (e as Error).message;
-      modal = '';
     } finally {
       loading = false;
     }
@@ -145,24 +150,24 @@
         Policy note: {item.safety_reason}
       </div>{/if}
     <div class="grid stats">
-      <div class="stat">
-        <span class="label">Service version path</span><strong
-          >{imageVersion(item)} -> {imageVersion(item)}</strong
-        ><small>Image tag used for pull</small>
-      </div>
       <div class="stat attn">
-        <span class="label">Digest path</span><strong
-          >{short(item.current_digest)} -> {short(item.remote_digest)}</strong
-        ><small>{item.update_available ? 'Registry digest changed' : 'No digest change detected'}</small>
+        <span class="label">Update posture</span><strong
+          >{item.update_available ? 'Actionable' : 'Current'}</strong
+        ><small>{item.update_available ? 'Registry changed' : 'No image change detected'}</small>
       </div>
       <div class="stat">
-        <span class="label">Current source</span><strong>{item.management_kind}</strong><small
-          >{item.compose_project || item.agent_id}</small
-        >
+        <span class="label">Source</span><strong
+          >{item.management_kind === 'compose' ? 'Compose' : 'Container'}</strong
+        ><small>{item.compose_project || item.agent_id}</small>
       </div>
       <div class="stat">
         <span class="label">Policy</span><strong>{item.manageable ? 'Managed' : 'Review'}</strong><small
-          >{item.ignored || item.protected ? 'Blocked by flag' : 'Ready for dry-run'}</small
+          >{item.ignored || item.protected ? 'Flagged by policy' : 'Eligible for preview'}</small
+        >
+      </div>
+      <div class="stat">
+        <span class="label">Runtime</span><strong>{item.runtime_status}</strong><small
+          >Synced {since(item.last_sync)}</small
         >
       </div>
     </div>
@@ -175,21 +180,32 @@
         <dl class="detail-list">
           <dt>Image reference</dt>
           <dd class="mono">{item.image}</dd>
-          <dt>Local digest</dt>
-          <dd class="mono">
-            {short(item.current_digest)} <span class="sub">{item.current_digest || 'Unavailable'}</span>
-          </dd>
-          <dt>Registry digest</dt>
-          <dd class="mono">
-            {short(item.remote_digest)} <span class="sub">{item.remote_digest || 'Not evaluated'}</span>
-          </dd>
-          <dt>Detection</dt>
-          <dd>{item.detection_method || 'No registry result'}</dd>
-          <dt>Docker ID</dt>
-          <dd class="mono">{item.docker_id}</dd>
           <dt>Agent</dt>
           <dd><a href={`/agents/${item.agent_id}`}>{item.agent_id}</a></dd>
         </dl>
+        <details class="tech-fold">
+          <summary>Show technical signals</summary>
+          <div class="tech-grid">
+            <div>
+              <span>Local digest</span>
+              <strong class="mono">{short(item.current_digest)}</strong>
+              <small>{item.current_digest || 'Unavailable'}</small>
+            </div>
+            <div>
+              <span>Registry digest</span>
+              <strong class="mono">{short(item.remote_digest)}</strong>
+              <small>{item.remote_digest || 'Not evaluated'}</small>
+            </div>
+            <div>
+              <span>Docker ID</span>
+              <strong class="mono">{item.docker_id}</strong>
+            </div>
+            <div>
+              <span>Detection</span>
+              <strong>{item.detection_method || 'No registry result'}</strong>
+            </div>
+          </div>
+        </details>
       </section>
       <section class="panel">
         <div class="panel-head"><h2>Management policy</h2></div>
@@ -211,23 +227,29 @@
         </dl>
       </section>
     </div>
-    <section class="panel" style="margin-top:16px">
+    <section class="panel readiness-panel" style="margin-top:16px">
       <div class="panel-head">
         <div>
           <h2>Update readiness</h2>
-          <span>Preflight checks for the selected scope</span>
+          <span>Preflight checks, optional preview and the final update action</span>
         </div>
       </div>
       <div class="readiness">
-        <div class="readiness-flow">
-          <div class:ready={Boolean(preflight)}>
-            <span>1</span><strong>Preflight</strong><small>Rules checked</small>
+        <div class="readiness-summary">
+          <div class:ready={Boolean(preflight?.can_update)}>
+            <strong>1</strong>
+            <span>Preflight</span>
+            <small>{preflight?.can_update ? 'Checks passed' : 'Review blockers'}</small>
           </div>
-          <div class:ready={dryRunReviewed}>
-            <span>2</span><strong>Dry-run</strong><small>{dryRunReviewed ? 'Reviewed' : 'Required'}</small>
+          <div class:ready={previewSeen}>
+            <strong>2</strong>
+            <span>Preview</span>
+            <small>{previewSeen ? 'Open' : 'Optional'}</small>
           </div>
           <div class:ready={updateReady}>
-            <span>3</span><strong>Update</strong><small>{updateReady ? 'Ready' : 'Blocked'}</small>
+            <strong>3</strong>
+            <span>Update</span>
+            <small>{updateReady ? 'Ready' : 'Locked'}</small>
           </div>
         </div>
         {#if preflight}
@@ -240,80 +262,92 @@
             {/each}
           </div>
         {/if}
-        {#if !dryRunReviewed}
-          <div class="callout">Run Inspect dry run for this scope before Update now becomes available.</div>
-        {/if}
+        <div class="readiness-note">
+          <div class="callout">{updateHint}</div>
+          <span class="sub">{previewHint}</span>
+        </div>
         <div class="operation-actions">
           {#if item.management_kind === 'compose'}<select
               class="btn"
               value={scope}
               onchange={(e) => changeScope(e.currentTarget.value)}
+              aria-label="Update scope"
               ><option value="service">This service</option><option value="stack">Entire stack</option
               ></select
-            >{/if}<button class="btn" disabled={!preflight?.can_dry_run} onclick={dry}>Inspect dry run</button
-          ><button
-            class="btn primary"
-            disabled={!updateReady}
-            onclick={() => {
-              modal = 'Confirm update';
-              modalText = `DockPulse will execute the reviewed ${scope} update on ${item?.name}. Persistent data mounts are preserved, but application-level rollback is not guaranteed.`;
-            }}>Update now</button
-          ><button class="btn" onclick={() => flag(item?.ignored ? 'unignore' : 'ignore')}
-            >{item.ignored ? 'Unignore' : 'Ignore'}</button
-          ><button class="btn" onclick={() => flag(item?.protected ? 'unprotect' : 'protect')}
-            >{item.protected ? 'Unprotect' : 'Protect'}</button
+            >{/if}<button
+            class="btn"
+            disabled={!preflight?.can_dry_run}
+            title={!preflight?.can_dry_run
+              ? 'Run preflight checks before previewing changes.'
+              : 'Optional preview; does not block Update now.'}
+            onclick={dry}
           >
-          {#if item.management_kind === 'compose'}<button
-              class="btn"
-              onclick={() => flagStack(item?.ignored ? 'unignore' : 'ignore')}
-              >{item.ignored ? 'Unignore stack' : 'Ignore stack'}</button
-            >{/if}
+            Preview changes
+          </button><button class="btn primary" disabled={!updateReady} title={updateHint} onclick={update}>
+            Update now
+          </button>
+          <details class="menu">
+            <summary class="btn">More actions</summary>
+            <div class="menu-panel">
+              <button class="btn" onclick={() => flag(item?.ignored ? 'unignore' : 'ignore')}
+                >{item.ignored ? 'Unignore' : 'Ignore'}</button
+              >
+              <button class="btn" onclick={() => flag(item?.protected ? 'unprotect' : 'protect')}
+                >{item.protected ? 'Unprotect' : 'Protect'}</button
+              >
+              {#if item.management_kind === 'compose'}<button
+                  class="btn"
+                  onclick={() => flagStack(item?.ignored ? 'unignore' : 'ignore')}
+                  >{item.ignored ? 'Unignore stack' : 'Ignore stack'}</button
+                >{/if}
+            </div>
+          </details>
         </div>
+        {#if dryRunOpen}
+          <div class="dry-run-panel">
+            <div class="panel-head dry-run-head">
+              <div>
+                <h3>Preview changes</h3>
+                <span>Optional inspection. It does not gate Update now.</span>
+              </div>
+              <button class="btn" onclick={() => (dryRunOpen = false)}>Hide preview</button>
+            </div>
+            {#if dryRunPlan}
+              <div class="plan">
+                <div class="plan-summary">
+                  <div>
+                    <span>Target</span>
+                    <strong>{dryRunPlan.target}</strong>
+                  </div>
+                  <div>
+                    <span>Scope</span>
+                    <strong>{dryRunPlan.scope}</strong>
+                  </div>
+                </div>
+                <ol class="plan-steps">
+                  {#each dryRunPlan.steps as step}
+                    <li>{step}</li>
+                  {/each}
+                </ol>
+                {#if dryRunPlan.warnings?.length}
+                  <div class="plan-warnings">
+                    {#each dryRunPlan.warnings as warning}
+                      <div class="callout">{warning}</div>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            {:else}
+              <pre>{dryRunText || 'Preview accepted.'}</pre>
+            {/if}
+            <div class="dry-run-actions">
+              <div class="callout" style="margin:0">
+                This snapshot can help you understand the change, but it is not a guarantee that the live
+                update will succeed.
+              </div>
+            </div>
+          </div>
+        {/if}
       </div>
     </section>{/if}
 </section>
-{#if modal}<div
-    class="modal-backdrop"
-    role="presentation"
-    onclick={(e) => {
-      if (e.target === e.currentTarget) modal = '';
-    }}
-  >
-    <div class="modal" role="dialog" aria-modal="true">
-      <h2>{modal}</h2>
-      {#if modal === 'Dry-run plan'}
-        <div class="callout">
-          Dry-run is an inspection only: DockPulse validated what it would do, but did not change Docker.
-        </div>
-        {#if dryRunPlan}
-          <div class="plan">
-            <div class="plan-summary">
-              <div><span>Target</span><strong>{dryRunPlan.target}</strong></div>
-              <div><span>Scope</span><strong>{dryRunPlan.scope}</strong></div>
-            </div>
-            <ol class="plan-steps">
-              {#each dryRunPlan.steps as step}<li>{step}</li>{/each}
-            </ol>
-            {#if dryRunPlan.warnings?.length}
-              <div class="plan-warnings">
-                {#each dryRunPlan.warnings as warning}<div class="callout">{warning}</div>{/each}
-              </div>
-            {/if}
-          </div>
-        {:else}
-          <pre>{modalText}</pre>
-        {/if}
-      {:else if modal === 'Update not ready'}<pre>{modalText}</pre>
-        <div class="callout">
-          Fix the blocked checks or run a fresh dry-run for the selected scope.
-        </div>{:else}<p>{modalText}</p>
-        <div class="callout">
-          This action recreates runtime state using the dry-run you just reviewed.
-        </div>{/if}
-      <div class="actions" style="justify-content:flex-end;margin-top:16px">
-        <button class="btn" onclick={() => (modal = '')}>Cancel</button
-        >{#if modal === 'Confirm update'}<button class="btn danger" onclick={update}>Confirm update</button
-          >{/if}
-      </div>
-    </div>
-  </div>{/if}
