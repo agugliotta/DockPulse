@@ -117,7 +117,7 @@
     <section class="panel">
       <div class="panel-head">
         <div>
-      <h2>Agent readiness</h2>
+          <h2>Agent readiness</h2>
           <span>Agents are prerequisites, not update candidates</span>
         </div>
         <a href="/agents" class="btn">All agents</a>

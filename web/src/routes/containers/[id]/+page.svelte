@@ -2,15 +2,7 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
-  import {
-    api,
-    parsePlan,
-    short,
-    since,
-    type Container,
-    type Job,
-    type UpdatePreflight
-  } from '$lib/api';
+  import { api, parsePlan, short, since, type Container, type Job, type UpdatePreflight } from '$lib/api';
   import Status from '$lib/Status.svelte';
   let item = $state<Container | null>(null);
   let preflight = $state<UpdatePreflight | null>(null);
@@ -159,12 +151,13 @@
       </div>{/if}
     <div class="grid stats">
       <div class="stat attn">
-        <span class="label">Update posture</span><strong>{item.update_available ? 'Actionable' : 'Current'}</strong><small
-          >{item.update_available ? 'Registry changed' : 'No image change detected'}</small
-        >
+        <span class="label">Update posture</span><strong
+          >{item.update_available ? 'Actionable' : 'Current'}</strong
+        ><small>{item.update_available ? 'Registry changed' : 'No image change detected'}</small>
       </div>
       <div class="stat">
-        <span class="label">Source</span><strong>{item.management_kind === 'compose' ? 'Compose' : 'Container'}</strong
+        <span class="label">Source</span><strong
+          >{item.management_kind === 'compose' ? 'Compose' : 'Container'}</strong
         ><small>{item.compose_project || item.agent_id}</small>
       </div>
       <div class="stat">
@@ -284,18 +277,16 @@
             >{/if}<button
             class="btn"
             disabled={!preflight?.can_dry_run}
-            title={!preflight?.can_dry_run ? 'Run preflight checks before previewing changes.' : 'Optional preview; does not block Update now.'}
+            title={!preflight?.can_dry_run
+              ? 'Run preflight checks before previewing changes.'
+              : 'Optional preview; does not block Update now.'}
             onclick={dry}
           >
             Preview changes
-          </button><button
-            class="btn primary"
-            disabled={!updateReady}
-            title={updateHint}
-            onclick={update}
-          >
+          </button><button class="btn primary" disabled={!updateReady} title={updateHint} onclick={update}>
             Update now
-          </button><details class="menu">
+          </button>
+          <details class="menu">
             <summary class="btn">More actions</summary>
             <div class="menu-panel">
               <button class="btn" onclick={() => flag(item?.ignored ? 'unignore' : 'ignore')}
@@ -351,8 +342,8 @@
             {/if}
             <div class="dry-run-actions">
               <div class="callout" style="margin:0">
-                This snapshot can help you understand the change, but it is not a guarantee that the live update
-                will succeed.
+                This snapshot can help you understand the change, but it is not a guarantee that the live
+                update will succeed.
               </div>
             </div>
           </div>

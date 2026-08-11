@@ -44,7 +44,7 @@
   onDestroy(() => source?.close());
 </script>
 
-  <section class="page">
+<section class="page">
   {#if job}<header class="page-head">
       <div>
         <span class="eyebrow">{job.action === 'dry-run' ? 'Preview detail' : 'Execution detail'}</span>

@@ -73,7 +73,9 @@
                       >-&gt;</span
                     ><span class="version-token target">registry {short(c.remote_digest)}</span>
                   </div>
-                  <span class="sub">{c.update_available ? 'Registry digest changed' : 'No digest change'}</span>
+                  <span class="sub"
+                    >{c.update_available ? 'Registry digest changed' : 'No digest change'}</span
+                  >
                   {#if c.update_available}<Status
                       value="update-available"
                       label="Digest changes"
