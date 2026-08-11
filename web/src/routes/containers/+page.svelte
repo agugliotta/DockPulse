@@ -55,7 +55,7 @@
     <div class="table-wrap">
       <table>
         <thead
-          ><tr><th>Workload</th><th>Agent</th><th>Runtime</th><th>Version path</th><th>Management</th></tr
+          ><tr><th>Workload</th><th>Agent</th><th>Runtime</th><th>Digest path</th><th>Management</th></tr
           ></thead
         ><tbody
           >{#each shown as c}<tr
@@ -67,12 +67,13 @@
                 ><Status value={c.runtime_status} /></td
               ><td>
                 <div class="version-flow">
+                  <strong>{imageVersion(c)}</strong>
                   <div class="path">
-                    <span class="version-token">{imageVersion(c)}</span><span class="arrow">-&gt;</span><span
-                      class="version-token target">{imageVersion(c)}</span
-                    >
+                    <span class="version-token">local {short(c.current_digest)}</span><span class="arrow"
+                      >-&gt;</span
+                    ><span class="version-token target">registry {short(c.remote_digest)}</span>
                   </div>
-                  <span class="sub">{short(c.current_digest)} -> {short(c.remote_digest)}</span>
+                  <span class="sub">{c.update_available ? 'Registry digest changed' : 'No digest change'}</span>
                   {#if c.update_available}<Status
                       value="update-available"
                       label="Digest changes"
