@@ -18,6 +18,10 @@
   }
   onMount(load);
   const count = (id: string) => containers.filter((c) => c.agent_id === id).length;
+  const readyAgents = $derived(agents.filter((a) => a.status === 'healthy' && !a.read_only));
+  const attentionAgents = $derived(agents.filter((a) => a.status !== 'healthy' || a.read_only));
+  const offlineAgents = $derived(agents.filter((a) => a.status === 'offline'));
+  const writableAgents = $derived(agents.filter((a) => !a.read_only));
 </script>
 
 {#if loading}<div class="loading"></div>{/if}
@@ -31,6 +35,56 @@
     <button class="btn" onclick={load}>↻ Refresh</button>
   </header>
   {#if error}<div class="callout errorbox">{error}</div>{/if}
+  <section class="panel" style="margin-bottom:16px">
+    <div class="panel-head">
+      <div>
+        <h2>Agent readiness</h2>
+        <span>Agents are reviewed here, not in the overview</span>
+      </div>
+      <span>{readyAgents.length} ready</span>
+    </div>
+    <div class="readiness-board">
+      <div class="readiness-summary">
+        <div class:ready={readyAgents.length === agents.length && agents.length > 0}>
+          <strong>{readyAgents.length}</strong>
+          <span>Ready</span>
+          <small>Healthy and writable</small>
+        </div>
+        <div class:ready={attentionAgents.length === 0}>
+          <strong>{attentionAgents.length}</strong>
+          <span>Attention</span>
+          <small>{attentionAgents.length === 0 ? 'No blockers' : 'Need review'}</small>
+        </div>
+        <div class:ready={offlineAgents.length === 0}>
+          <strong>{offlineAgents.length}</strong>
+          <span>Offline</span>
+          <small>{offlineAgents.length === 0 ? 'All online' : 'Heartbeat missing'}</small>
+        </div>
+      </div>
+      {#if attentionAgents.length}
+        <ul class="activity compact">
+          {#each attentionAgents.slice(0, 6) as agent}
+            <li>
+              <i
+                class:success={agent.status === 'healthy' && !agent.read_only}
+                class:failure={agent.status === 'offline'}
+              ></i>
+              <div>
+                <a href={`/agents/${agent.id}`}><strong>{agent.name}</strong></a><small
+                  >{agent.status} · {agent.read_only ? 'read-only' : 'writable'} · heartbeat {since(
+                    agent.last_heartbeat
+                  )}</small
+                >
+              </div>
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <div class="callout">All agents are healthy and writable.</div>
+      {/if}
+      <div class="sub" style="padding:0 2px">{writableAgents.length} writable · {agents.length - writableAgents.length} read only</div>
+    </div>
+  </section>
   <section class="panel">
     <div class="panel-head">
       <h2>Registered agents</h2>

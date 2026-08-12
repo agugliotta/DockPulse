@@ -21,6 +21,16 @@
       >{/each}
   </nav>
   <div class="sidebar-foot">
-    <span class="connection"><i></i> Control online</span><small>v0.3.0 · MVP</small>
+    <a
+      class="connection"
+      href="https://github.com/agugliotta/DockPulse"
+      target="_blank"
+      rel="noreferrer"
+      aria-label="Open DockPulse repository on GitHub"
+    >
+      <i></i>
+      <span>Control online</span>
+      <small>Repo</small>
+    </a>
   </div>
 </aside>
