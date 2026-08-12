@@ -82,7 +82,9 @@
       {:else}
         <div class="callout">All agents are healthy and writable.</div>
       {/if}
-      <div class="sub" style="padding:0 2px">{writableAgents.length} writable · {agents.length - writableAgents.length} read only</div>
+      <div class="sub" style="padding:0 2px">
+        {writableAgents.length} writable · {agents.length - writableAgents.length} read only
+      </div>
     </div>
   </section>
   <section class="panel">

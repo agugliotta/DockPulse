@@ -47,7 +47,8 @@
   const online = $derived(agents.filter((a) => a.status === 'healthy').length);
   const active = $derived(jobs.filter((j) => ['queued', 'running'].includes(j.status)).length);
   const activityFeed = $derived(orderedJobs.slice(0, 8));
-  const share = (value: number, total: number) => (total ? Math.max(6, Math.round((value / total) * 100)) : 0);
+  const share = (value: number, total: number) =>
+    total ? Math.max(6, Math.round((value / total) * 100)) : 0;
 </script>
 
 {#if loading}<div class="loading"></div>{/if}
@@ -104,25 +105,37 @@
             <div class="metric-row">
               <div><span>Healthy</span><strong>{healthyAgents.length}</strong></div>
               <div class="metric-track">
-                <div class="metric-fill healthy" style={`width:${share(healthyAgents.length, agents.length)}%`}></div>
+                <div
+                  class="metric-fill healthy"
+                  style={`width:${share(healthyAgents.length, agents.length)}%`}
+                ></div>
               </div>
             </div>
             <div class="metric-row">
               <div><span>Degraded</span><strong>{degradedAgents.length}</strong></div>
               <div class="metric-track">
-                <div class="metric-fill warn" style={`width:${share(degradedAgents.length, agents.length)}%`}></div>
+                <div
+                  class="metric-fill warn"
+                  style={`width:${share(degradedAgents.length, agents.length)}%`}
+                ></div>
               </div>
             </div>
             <div class="metric-row">
               <div><span>Offline</span><strong>{offlineAgents.length}</strong></div>
               <div class="metric-track">
-                <div class="metric-fill danger" style={`width:${share(offlineAgents.length, agents.length)}%`}></div>
+                <div
+                  class="metric-fill danger"
+                  style={`width:${share(offlineAgents.length, agents.length)}%`}
+                ></div>
               </div>
             </div>
             <div class="metric-row">
               <div><span>Read only</span><strong>{readOnlyAgents.length}</strong></div>
               <div class="metric-track">
-                <div class="metric-fill neutral" style={`width:${share(readOnlyAgents.length, agents.length)}%`}></div>
+                <div
+                  class="metric-fill neutral"
+                  style={`width:${share(readOnlyAgents.length, agents.length)}%`}
+                ></div>
               </div>
             </div>
           </div>
@@ -139,25 +152,37 @@
             <div class="metric-row">
               <div><span>Updates</span><strong>{updateJobs.length}</strong></div>
               <div class="metric-track">
-                <div class="metric-fill" style={`width:${share(updateJobs.length, orderedJobs.length)}%`}></div>
+                <div
+                  class="metric-fill"
+                  style={`width:${share(updateJobs.length, orderedJobs.length)}%`}
+                ></div>
               </div>
             </div>
             <div class="metric-row">
               <div><span>Previews</span><strong>{previewJobs.length}</strong></div>
               <div class="metric-track">
-                <div class="metric-fill muted" style={`width:${share(previewJobs.length, orderedJobs.length)}%`}></div>
+                <div
+                  class="metric-fill muted"
+                  style={`width:${share(previewJobs.length, orderedJobs.length)}%`}
+                ></div>
               </div>
             </div>
             <div class="metric-row">
               <div><span>Self updates</span><strong>{selfUpdateJobs.length}</strong></div>
               <div class="metric-track">
-                <div class="metric-fill blue" style={`width:${share(selfUpdateJobs.length, orderedJobs.length)}%`}></div>
+                <div
+                  class="metric-fill blue"
+                  style={`width:${share(selfUpdateJobs.length, orderedJobs.length)}%`}
+                ></div>
               </div>
             </div>
             <div class="metric-row">
               <div><span>Failures</span><strong>{failedJobs.length}</strong></div>
               <div class="metric-track">
-                <div class="metric-fill danger" style={`width:${share(failedJobs.length, orderedJobs.length)}%`}></div>
+                <div
+                  class="metric-fill danger"
+                  style={`width:${share(failedJobs.length, orderedJobs.length)}%`}
+                ></div>
               </div>
             </div>
           </div>
@@ -194,9 +219,9 @@
                     value="protected"
                     label="Sensitive"
                   />{:else if !c.manageable}<Status value="ignored" label="Review" />{:else}<Status
-                  value="healthy"
-                  label="Eligible"
-                />{/if}</td
+                    value="healthy"
+                    label="Eligible"
+                  />{/if}</td
               ></tr
             >{:else}<tr><td colspan="4" class="empty">No actionable image updates detected.</td></tr
             >{/each}</tbody
