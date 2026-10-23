@@ -51,6 +51,8 @@ services:
       DOCKPULSE_SELF_UPDATE_DIR: ${DOCKPULSE_SELF_UPDATE_DIR:-/workspace}
       DOCKPULSE_SELF_UPDATE_PROJECT: ${DOCKPULSE_SELF_UPDATE_PROJECT:-dockpulse}
       DOCKPULSE_SELF_UPDATE_SERVICE: ${DOCKPULSE_SELF_UPDATE_SERVICE:-dockpulse-agent}
+      DOCKPULSE_SELF_UPDATE_COMPOSE_FILE: ${DOCKPULSE_SELF_UPDATE_COMPOSE_FILE:-/workspace/docker-compose.yml}
+      DOCKPULSE_SELF_UPDATE_ENV_FILE: ${DOCKPULSE_SELF_UPDATE_ENV_FILE:-/workspace/.env}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - .:/workspace:ro

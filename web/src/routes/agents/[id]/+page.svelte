@@ -3,6 +3,7 @@
   import { page } from '$app/state';
   import { api, since, type Agent, type Container } from '$lib/api';
   import Status from '$lib/Status.svelte';
+  import ImageStatus from '$lib/ImageStatus.svelte';
   let agent = $state<Agent | null>(null);
   let containers = $state<Container[]>([]);
   let loading = $state(true);
@@ -89,12 +90,7 @@
                   ></td
                 ><td><Status value={c.runtime_status} /></td><td
                   >{c.management_kind}<span class="sub">{c.compose_project || 'standalone'}</span></td
-                ><td
-                  >{#if c.update_available}<Status value="update-available" label="Update" />{:else}<Status
-                      value="healthy"
-                      label="Current"
-                    />{/if}</td
-                ><td
+                ><td><ImageStatus container={c} /></td><td
                   >{#if c.ignored}<Status value="ignored" />{:else if c.protected || c.sensitive}<Status
                       value="protected"
                     />{:else if c.manageable}<Status value="healthy" label="Managed" />{:else}<Status

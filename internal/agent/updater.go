@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +31,8 @@ type SelfUpdateConfig struct {
 	Project       string
 	Service       string
 	TargetVersion string
+	ComposeFile   string
+	EnvFile       string
 }
 
 func (u Updater) DryRun(ctx context.Context, req domain.ActionRequest) (Plan, error) {
@@ -109,12 +112,19 @@ func (u Updater) ExecuteSelfUpdate(ctx context.Context, targetVersion string, lo
 		logf("info", step)
 	}
 	cfg := u.SelfUpdate
-	base := []string{"compose", "--project-directory", cfg.Directory, "-p", cfg.Project}
+	file, envFile := cfg.ComposeFile, cfg.EnvFile
+	if file == "" {
+		file = filepath.Join(cfg.Directory, "deploy/docker-compose.agent.yml")
+	}
+	if envFile == "" {
+		envFile = filepath.Join(cfg.Directory, "deploy/agent.env")
+	}
+	base := []string{"compose", "--project-directory", cfg.Directory, "--env-file", envFile, "-f", file, "-p", cfg.Project}
 	env := []string{"DOCKPULSE_VERSION=" + targetVersion, "DOCKPULSE_UPDATE_VERSION=" + targetVersion}
 	if _, err = u.runDocker(ctx, env, append(append([]string{}, base...), "pull", cfg.Service)...); err != nil {
 		return err
 	}
-	_, err = u.runDocker(ctx, env, append(append([]string{}, base...), "up", "-d", cfg.Service)...)
+	_, err = u.runDocker(ctx, env, append(append([]string{}, base...), "up", "-d", "--no-deps", cfg.Service)...)
 	return err
 }
 
@@ -167,40 +177,75 @@ func (u Updater) composePlan(ctx context.Context, in inspectContainer, scope str
 	if scope != "service" && scope != "stack" {
 		return Plan{}, fmt.Errorf("Compose scope must be service or stack")
 	}
-	services := []string{service}
-	if scope == "stack" {
-		base := []string{"compose", "--project-directory", dir, "-p", project, "config", "--services"}
-		raw, err := u.Docker.Run(ctx, base...)
-		if err != nil {
-			return Plan{}, fmt.Errorf("enumerate Compose services: %w", err)
+	base := composeArgs(in)
+	raw, err := u.Docker.Run(ctx, append(base, "config", "--format", "json")...)
+	if err != nil {
+		return Plan{}, fmt.Errorf("enumerate Compose services: %w", err)
+	}
+	var config struct {
+		Services map[string]struct {
+			Image  string            `json:"image"`
+			Labels map[string]string `json:"labels"`
+		} `json:"services"`
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		return Plan{}, fmt.Errorf("decode Compose services: %w", err)
+	}
+	var services []string
+	for name, serviceConfig := range config.Services {
+		if scope == "service" && name != service {
+			continue
 		}
-		services = strings.Fields(string(raw))
-		if len(services) == 0 {
-			return Plan{}, fmt.Errorf("Compose project contains no services")
+		member := inspectContainer{}
+		member.Name = name
+		member.Config.Image = serviceConfig.Image
+		member.Config.Labels = serviceConfig.Labels
+		if member.Config.Labels == nil {
+			member.Config.Labels = map[string]string{}
 		}
+		member.Config.Labels["com.docker.compose.project"] = project
+		if err := validateManaged(member); err != nil {
+			return Plan{}, fmt.Errorf("Compose service %s: %w", name, err)
+		}
+		services = append(services, name)
+	}
+	sort.Strings(services)
+	if len(services) == 0 {
+		return Plan{}, fmt.Errorf("Compose configuration contains no services in the requested scope")
 	}
 	target := project
 	if scope == "service" {
 		target += "/" + service
 	}
-	suffix := ""
+	suffix, upSuffix := "", ""
 	if scope == "service" {
 		suffix = " " + service
+		upSuffix = " --no-deps " + service
 	}
-	return Plan{Target: target, Scope: scope, Steps: []string{"Update scope: " + scope + " " + target, "Services that may be recreated: " + strings.Join(services, ", "), "Download the newest image for the selected service(s) without changing anything yet", "Run Docker Compose from " + dir + " to recreate the selected service(s)", "After the update, refresh inventory and compare the new local digest against the registry digest"}, Warnings: []string{"Compose keeps volumes and bind mounts, but DockPulse does not verify application-level health after the container starts", "Equivalent commands: docker compose pull" + suffix + " && docker compose up -d" + suffix}}, nil
+	return Plan{Target: target, Scope: scope, Steps: []string{"Update scope: " + scope + " " + target, "Services that may be recreated: " + strings.Join(services, ", "), "Download the newest image for the selected service(s) without changing anything yet", "Run Docker Compose from " + dir + " to recreate the selected service(s)", "After the update, refresh inventory and compare the new local digest against the registry digest"}, Warnings: []string{"Compose keeps volumes and bind mounts, but DockPulse does not verify application-level health after the container starts", "Equivalent commands: docker compose pull" + suffix + " && docker compose up -d" + upSuffix}}, nil
 }
 func (u Updater) validateDir(dir string) error {
 	return validateComposeDir(dir, u.AllowedComposeRoots)
 }
+func composeArgs(in inspectContainer) []string {
+	l := in.Config.Labels
+	args := []string{"compose", "--project-directory", l["com.docker.compose.project.working_dir"], "-p", l["com.docker.compose.project"]}
+	for _, file := range strings.Split(l["com.docker.compose.project.config_files"], ",") {
+		if file != "" {
+			args = append(args, "-f", file)
+		}
+	}
+	return args
+}
 func (u Updater) executeCompose(ctx context.Context, in inspectContainer, scope string) error {
 	l := in.Config.Labels
-	dir, project, service := l["com.docker.compose.project.working_dir"], l["com.docker.compose.project"], l["com.docker.compose.service"]
-	base := []string{"compose", "--project-directory", dir, "-p", project}
+	service := l["com.docker.compose.service"]
+	base := composeArgs(in)
 	pull := append(append([]string{}, base...), "pull")
 	up := append(append([]string{}, base...), "up", "-d")
 	if scope != "stack" {
 		pull = append(pull, service)
-		up = append(up, service)
+		up = append(up, "--no-deps", service)
 	}
 	if _, err := u.Docker.Run(ctx, pull...); err != nil {
 		return err
@@ -219,6 +264,9 @@ func (u Updater) runPlan(in inspectContainer) (Plan, error) {
 }
 
 func createArgs(in inspectContainer, name string) ([]string, []string, error) {
+	if err := validateRunContract(in); err != nil {
+		return nil, nil, err
+	}
 	if in.HostConfig.AutoRemove {
 		return nil, nil, fmt.Errorf("containers created with --rm cannot be updated safely because stopping deletes the rollback candidate")
 	}
@@ -325,6 +373,18 @@ func createArgs(in inspectContainer, name string) ([]string, []string, error) {
 	if in.Config.User != "" {
 		a = append(a, "--user", in.Config.User)
 	}
+	if in.Config.Hostname != "" && in.Config.Hostname != in.ID && !(len(in.ID) >= 12 && in.Config.Hostname == in.ID[:12]) {
+		a = append(a, "--hostname", in.Config.Hostname)
+	}
+	if in.Config.Domainname != "" {
+		a = append(a, "--domainname", in.Config.Domainname)
+	}
+	if in.Config.StopSignal != "" {
+		a = append(a, "--stop-signal", in.Config.StopSignal)
+	}
+	if in.Config.StopTimeout != nil {
+		a = append(a, "--stop-timeout", strconv.Itoa(*in.Config.StopTimeout))
+	}
 	primaryNetwork, additionalNetworks := networkPlan(in)
 	if primaryNetwork != "" && primaryNetwork != "bridge" && primaryNetwork != "default" {
 		a = append(a, "--network", primaryNetwork)
@@ -341,6 +401,52 @@ func createArgs(in inspectContainer, name string) ([]string, []string, error) {
 	}
 	a = append(a, in.Config.Cmd...)
 	return a, warnings, nil
+}
+
+func validateRunContract(in inspectContainer) error {
+	h := in.HostConfig
+	if (h.PidsLimit != nil && *h.PidsLimit > 0) || (h.OomKillDisable != nil && *h.OomKillDisable) || h.BlkioWeight != 0 || h.CpuRealtimePeriod != 0 || h.CpuRealtimeRuntime != 0 || len(h.StorageOpt) > 0 {
+		return fmt.Errorf("process, I/O or storage limits cannot yet be preserved safely")
+	}
+	if (h.Init != nil && *h.Init) || in.Config.Tty || in.Config.OpenStdin || in.Config.StdinOnce {
+		return fmt.Errorf("init and interactive settings cannot yet be preserved safely")
+	}
+	if h.Memory != 0 || h.MemorySwap != 0 || h.MemoryReservation != 0 || h.NanoCpus != 0 || h.CpuShares != 0 || h.CpuQuota != 0 || h.CpuPeriod != 0 || h.CpusetCpus != "" || h.CpusetMems != "" || h.CgroupParent != "" || len(h.Ulimits) > 0 {
+		return fmt.Errorf("resource limits cannot yet be preserved safely")
+	}
+	if len(h.Devices) > 0 || len(h.DeviceRequests) > 0 || len(h.SecurityOpt) > 0 || len(h.Sysctls) > 0 || len(h.GroupAdd) > 0 || h.UsernsMode != "" || h.UTSMode != "" || h.PidMode != "" || (h.Runtime != "" && h.Runtime != "runc") || (h.IpcMode != "" && h.IpcMode != "private") || (h.ShmSize != 0 && h.ShmSize != 64<<20) {
+		return fmt.Errorf("device, security or namespace settings cannot yet be preserved safely")
+	}
+	if len(h.Dns) > 0 || len(h.DnsSearch) > 0 || len(h.DnsOptions) > 0 || len(h.ExtraHosts) > 0 {
+		return fmt.Errorf("custom DNS and host settings cannot yet be preserved safely")
+	}
+	if len(in.Config.Healthcheck) > 0 && string(in.Config.Healthcheck) != "null" {
+		return fmt.Errorf("healthcheck settings cannot yet be preserved safely")
+	}
+	for _, raw := range in.NetworkSettings.Networks {
+		var endpoint struct {
+			Aliases    []string
+			IPAMConfig json.RawMessage
+		}
+		if len(raw) == 0 || string(raw) == "null" {
+			continue
+		}
+		if err := json.Unmarshal(raw, &endpoint); err != nil {
+			return fmt.Errorf("invalid network endpoint settings: %w", err)
+		}
+		if len(endpoint.IPAMConfig) > 0 && string(endpoint.IPAMConfig) != "null" {
+			return fmt.Errorf("static network configuration cannot yet be preserved safely")
+		}
+		for _, alias := range endpoint.Aliases {
+			if alias != strings.TrimPrefix(in.Name, "/") && alias != in.ID && !(len(in.ID) >= 12 && alias == in.ID[:12]) {
+				return fmt.Errorf("custom network aliases cannot yet be preserved safely")
+			}
+		}
+	}
+	if len(h.LogConfig.Config) > 0 || (h.LogConfig.Type != "" && h.LogConfig.Type != "json-file") {
+		return fmt.Errorf("custom logging settings cannot yet be preserved safely")
+	}
+	return nil
 }
 
 func bindDestination(spec string) string {
@@ -415,7 +521,9 @@ func (u Updater) executeRun(ctx context.Context, in inspectContainer, logf func(
 		return err
 	}
 	if _, err = u.Docker.Run(ctx, "rename", name, backup); err != nil {
-		_, _ = u.Docker.Run(ctx, "start", name)
+		recoveryCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		_, _ = u.Docker.Run(recoveryCtx, "start", name)
 		return err
 	}
 	rollback := func(cause error) error {

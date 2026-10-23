@@ -2,6 +2,7 @@ package control
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -16,6 +17,116 @@ import (
 	"github.com/dockpulse/dockpulse/internal/domain"
 	"github.com/dockpulse/dockpulse/internal/store"
 )
+
+func TestStackUpdateChecksEveryMember(t *testing.T) {
+	for _, policy := range []string{"ignored", "protected", "sensitive", "unmanageable"} {
+		t.Run(policy, func(t *testing.T) {
+			st, err := store.Open(filepath.Join(t.TempDir(), "stack.db"), base64.StdEncoding.EncodeToString(make([]byte, 32)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer st.Close()
+			ctx := t.Context()
+			if err := st.RegisterAgent(ctx, domain.Agent{ID: "a", Name: "a", BaseURL: "http://agent"}, []byte("secret")); err != nil {
+				t.Fatal(err)
+			}
+			members := []domain.Container{
+				{DockerID: "web", Name: "web", RuntimeStatus: "running", ManagementKind: "compose", ComposeProject: "app", ComposeWorkingDir: "/app", Manageable: true},
+				{DockerID: "db", Name: "db", RuntimeStatus: "running", ManagementKind: "compose", ComposeProject: "app", Manageable: policy != "unmanageable", Sensitive: policy == "sensitive"},
+			}
+			if err := st.UpsertInventory(ctx, domain.Inventory{AgentID: "a", SyncedAt: time.Now(), Containers: members}); err != nil {
+				t.Fatal(err)
+			}
+			if policy == "ignored" || policy == "protected" {
+				if err := st.SetContainerFlag(ctx, "a:db", policy, true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s := New(st, "bootstrap", "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+			s.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				t.Error("blocked stack was dispatched")
+				return nil, context.Canceled
+			})}
+			r := httptest.NewRecorder()
+			s.Handler().ServeHTTP(r, httptest.NewRequest("POST", "/api/v1/containers/a:web/update", bytes.NewBufferString(`{"confirm":true,"scope":"stack"}`)))
+			if r.Code != 409 {
+				t.Fatalf("status %d: %s", r.Code, r.Body.String())
+			}
+			r = httptest.NewRecorder()
+			s.Handler().ServeHTTP(r, httptest.NewRequest("GET", "/api/v1/containers/a:web/preflight?scope=stack", nil))
+			var pf domain.UpdatePreflight
+			if err := json.Unmarshal(r.Body.Bytes(), &pf); err != nil || pf.CanUpdate {
+				t.Fatalf("preflight allowed blocked stack: %+v %v", pf, err)
+			}
+		})
+	}
+}
+
+func TestTerminalStatusPublishesAfterPersistence(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "events.db"), base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	secret := []byte("abcdefghijklmnopqrstuvwxyz123456")
+	if err := st.RegisterAgent(t.Context(), domain.Agent{ID: "a", Name: "a"}, secret); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateJob(t.Context(), domain.Job{ID: "job", AgentID: "a", TargetKey: "target", Status: domain.StatusRunning, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	s := New(st, "bootstrap", "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ch := make(chan domain.Event, 16)
+	s.subscribe("job", ch)
+	defer s.unsubscribe("job", ch)
+	body := []byte(`{"agent_id":"a","control_job_id":"job","status":"succeeded"}`)
+	req := httptest.NewRequest("POST", "/api/v1/agent-events", bytes.NewReader(body))
+	auth.Sign(req, "a", secret, body, time.Now())
+	res := httptest.NewRecorder()
+	s.Handler().ServeHTTP(res, req)
+	if res.Code != 202 {
+		t.Fatalf("status %d: %s", res.Code, res.Body.String())
+	}
+	select {
+	case ev := <-ch:
+		job, err := st.Job(t.Context(), "job")
+		if err != nil || job.Status != domain.StatusSucceeded || ev.Message != "Job status: succeeded" {
+			t.Fatalf("bad event or stale status: %+v %+v %v", ev, job, err)
+		}
+	default:
+		t.Fatal("terminal status was not published")
+	}
+	events, err := st.Events(t.Context(), "job", 0)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("terminal status not available for reconnect: %+v %v", events, err)
+	}
+}
+
+func TestRefreshAllowsTheAgentInventoryDeadline(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "timeout.db"), base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	a := domain.Agent{ID: "a", Name: "a", BaseURL: "http://agent"}
+	if err := st.RegisterAgent(t.Context(), a, []byte("secret")); err != nil {
+		t.Fatal(err)
+	}
+	s := New(st, "bootstrap", "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s.client = &http.Client{Timeout: 20 * time.Second, Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		deadline, ok := r.Context().Deadline()
+		if !ok || time.Until(deadline) < 90*time.Second {
+			t.Errorf("refresh still uses short timeout: %v", deadline)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewBufferString(`{}`)), Header: make(http.Header)}, nil
+	})}
+	if err := s.agentCall(t.Context(), a, "POST", "/refresh", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if s.client.Timeout != 20*time.Second {
+		t.Fatal("refresh changed timeout for all requests")
+	}
+}
 
 func TestRegisterAcceptsDocumentedSnakeCasePayload(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString([]byte("01234567890123456789012345678901"))

@@ -10,6 +10,70 @@ import (
 	"github.com/dockpulse/dockpulse/internal/domain"
 )
 
+func TestInventoryCannotOverwriteAnotherAgent(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "isolation.db"), base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := t.Context()
+	for _, id := range []string{"victim", "sender"} {
+		if err := st.RegisterAgent(ctx, domain.Agent{ID: id, Name: id}, []byte("secret")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.UpsertInventory(ctx, domain.Inventory{AgentID: "victim", SyncedAt: time.Now(), Containers: []domain.Container{{DockerID: "original", Name: "web", Image: "original", RuntimeStatus: "running"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertInventory(ctx, domain.Inventory{AgentID: "sender", SyncedAt: time.Now(), Containers: []domain.Container{{ID: "victim:original", AgentID: "victim", DockerID: "forged", Name: "forged", Image: "forged", RuntimeStatus: "running"}}}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := st.Container(ctx, "victim:original")
+	if err != nil || c.Image != "original" || c.DockerID != "original" || c.AgentID != "victim" {
+		t.Fatalf("victim changed: %+v %v", c, err)
+	}
+	c, err = st.Container(ctx, "sender:forged")
+	if err != nil || c.AgentID != "sender" {
+		t.Fatalf("inventory was not scoped to sender: %+v %v", c, err)
+	}
+}
+
+func TestComposeProjectLockCoversServicesAndStack(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "project.db"), base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := t.Context()
+	if err := st.RegisterAgent(ctx, domain.Agent{ID: "a", Name: "a"}, []byte("secret")); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertInventory(ctx, domain.Inventory{AgentID: "a", SyncedAt: time.Now(), Containers: []domain.Container{
+		{DockerID: "web", Name: "web", ComposeProject: "app", RuntimeStatus: "running"},
+		{DockerID: "db", Name: "db", ComposeProject: "app", RuntimeStatus: "running"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	j := domain.Job{ID: "one", AgentID: "a", ContainerID: "a:web", TargetKey: "a:web", Action: "update", Status: domain.StatusRunning, CreatedAt: time.Now()}
+	if err := st.CreateJob(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	j.ID, j.ContainerID, j.TargetKey = "two", "a:db", "a:db"
+	if err := st.CreateJob(ctx, j); err == nil {
+		t.Fatal("another service acquired the project lock")
+	}
+	j.TargetKey = "a:stack:app"
+	if err := st.CreateJob(ctx, j); err == nil {
+		t.Fatal("stack acquired the project lock")
+	}
+	if err := st.UpdateJob(ctx, "one", domain.StatusSucceeded, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateJob(ctx, j); err != nil {
+		t.Fatalf("finished job did not release lock: %v", err)
+	}
+}
+
 func TestStoreInventoryPolicyAndTargetLock(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString([]byte("01234567890123456789012345678901"))
 	st, err := Open(filepath.Join(t.TempDir(), "test.db"), key)

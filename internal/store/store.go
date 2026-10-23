@@ -224,10 +224,10 @@ func (s *Store) UpsertInventory(ctx context.Context, inv domain.Inventory) error
 	}
 	for _, c := range inv.Containers {
 		labels, _ := json.Marshal(c.Labels)
-		id := c.ID
-		if id == "" {
-			id = inv.AgentID + ":" + c.DockerID
+		if c.DockerID == "" || c.Name == "" {
+			return errors.New("inventory requires container name and Docker ID")
 		}
+		id := inv.AgentID + ":" + c.DockerID
 		// Docker assigns a new ID whenever an update recreates a container. Keep
 		// the control-plane identity stable by matching the daemon-unique name;
 		// this preserves policy flags and audit references across recreation.
@@ -236,6 +236,14 @@ func (s *Store) UpsertInventory(ctx context.Context, inv domain.Inventory) error
 		if err == nil {
 			id = existingID
 		} else if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		var owner string
+		err = tx.QueryRowContext(ctx, "SELECT agent_id FROM containers WHERE id=?", id).Scan(&owner)
+		if err == nil && owner != inv.AgentID {
+			return errors.New("container identity belongs to another agent")
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO containers(id,agent_id,docker_id,name,image,tag,current_digest,remote_digest,update_available,detection_method,runtime_status,management_kind,compose_project,compose_service,compose_working_dir,labels_json,sensitive,manageable,safety_reason,last_sync)
@@ -338,12 +346,36 @@ func (s *Store) SetStackFlag(ctx context.Context, agentID, project, flag string,
 }
 
 func (s *Store) CreateJob(ctx context.Context, j domain.Job) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	var containerID any
 	if j.ContainerID != "" {
 		containerID = j.ContainerID
+		var project string
+		if err = tx.QueryRowContext(ctx, "SELECT compose_project FROM containers WHERE id=? AND agent_id=?", j.ContainerID, j.AgentID).Scan(&project); err != nil {
+			return err
+		}
+		if project != "" {
+			j.TargetKey = j.AgentID + ":stack:" + project
+			var active int
+			err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM update_jobs j LEFT JOIN containers c ON c.id=j.container_id
+				WHERE j.agent_id=? AND j.status IN ('queued','running') AND (j.target_key=? OR c.compose_project=?)`, j.AgentID, j.TargetKey, project).Scan(&active)
+			if err != nil {
+				return err
+			}
+			if active > 0 {
+				return errors.New("UNIQUE active Compose project lock")
+			}
+		}
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO update_jobs(id,agent_id,container_id,target_key,action,status,requested_by,correlation_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, j.ID, j.AgentID, containerID, j.TargetKey, j.Action, j.Status, j.RequestedBy, j.CorrelationID, ts(j.CreatedAt))
-	return err
+	_, err = tx.ExecContext(ctx, `INSERT INTO update_jobs(id,agent_id,container_id,target_key,action,status,requested_by,correlation_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, j.ID, j.AgentID, containerID, j.TargetKey, j.Action, j.Status, j.RequestedBy, j.CorrelationID, ts(j.CreatedAt))
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 func (s *Store) SetAgentJob(ctx context.Context, id, agentJob string) error {
 	// The agent starts asynchronously and may report completion before the HTTP

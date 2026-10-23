@@ -341,7 +341,7 @@ func (a *Agent) RunControlLoop(ctx context.Context) {
 	defer heartbeat.Stop()
 	inventory := time.NewTicker(a.cfg.InventoryInterval)
 	defer inventory.Stop()
-	refresh := func() {
+	refreshInventory := func() {
 		c, cancel := context.WithTimeout(ctx, 90*time.Second)
 		defer cancel()
 		inv, err := a.discovery.Inventory(c, a.cfg.ID, true)
@@ -354,6 +354,27 @@ func (a *Agent) RunControlLoop(ctx context.Context) {
 		a.mu.Unlock()
 		if err = a.sendHeartbeat(c, &inv); err != nil {
 			a.log.Error("inventory_delivery_failed", "error", err)
+		}
+	}
+	refreshRequests := make(chan struct{}, 1)
+	var worker sync.WaitGroup
+	worker.Add(1)
+	go func() {
+		defer worker.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-refreshRequests:
+				refreshInventory()
+			}
+		}
+	}()
+	defer worker.Wait()
+	refresh := func() {
+		select {
+		case refreshRequests <- struct{}{}:
+		default:
 		}
 	}
 	if registered {
