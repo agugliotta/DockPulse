@@ -9,7 +9,7 @@ Esta guía describe el comportamiento operativo del MVP. Las reglas críticas se
 3. Filtrar workloads con update y abrir el detalle.
 4. Revisar **Update readiness**: el preflight muestra agent, scope, políticas, contrato y digest.
 5. Ejecutar dry-run y revisar todos los pasos y warnings. Dry-run es una inspección; no cambia Docker.
-6. Confirmar **Update now** solo después de revisar el dry-run para el mismo scope.
+6. Confirmar **Update now** cuando el preflight lo permita; el preview es opcional y no garantiza que la ejecución vaya a terminar correctamente.
 7. Para una primera intervención, actualizar un servicio no crítico antes que un stack completo.
 8. Seguir el job hasta estado terminal y revisar logs del servicio después de DockPulse.
 
@@ -50,7 +50,7 @@ La vista de detalle de un workload ejecuta un preflight para el scope selecciona
 - política de workloads sensibles;
 - comparación de digest local/remoto.
 
-`Can dry-run` y `Can update` se calculan por separado. Un Agent en read-only puede permitir dry-run pero bloquear update; un workload no administrable bloquea ambos. La UI exige un dry-run exitoso para el mismo scope antes de habilitar **Update now**.
+`Can dry-run` y `Can update` se calculan por separado. Un Agent en read-only puede permitir dry-run pero bloquear update; un workload no administrable bloquea ambos. El preview es opcional. Un update de stack revisa las políticas de todos sus workloads conocidos y vuelve a validar los servicios del archivo Compose en el Agent. Las actualizaciones de servicio usan `--no-deps` para no recrear dependencias fuera del scope seleccionado.
 
 Dry-run crea una inspección auditable en Activity. Si aparece como `Inspection`, significa que DockPulse validó y guardó el plan, no que haya recreado contenedores.
 
@@ -79,15 +79,18 @@ El self-update de Agents es opt-in. Requiere:
 - `DOCKPULSE_READ_ONLY=false`;
 - `DOCKPULSE_SELF_UPDATE_ENABLED=true`;
 - `DOCKPULSE_SELF_UPDATE_DIR`, `DOCKPULSE_SELF_UPDATE_PROJECT` y `DOCKPULSE_SELF_UPDATE_SERVICE` apuntando al Compose que ejecuta ese Agent.
+- `DOCKPULSE_SELF_UPDATE_COMPOSE_FILE` y `DOCKPULSE_SELF_UPDATE_ENV_FILE` identificando los archivos usados al instalar. Los defaults son `<dir>/deploy/docker-compose.agent.yml` y `<dir>/deploy/agent.env`.
 
 Desde **System**, el botón **Self-update** crea un job auditable y el Agent ejecuta:
 
 ```text
-docker compose --project-directory <dir> -p <project> pull <service>
-docker compose --project-directory <dir> -p <project> up -d <service>
+docker compose --project-directory <dir> --env-file <env-file> -f <compose-file> -p <project> pull <service>
+docker compose --project-directory <dir> --env-file <env-file> -f <compose-file> -p <project> up -d --no-deps <service>
 ```
 
 Para actualizar el Server con el mismo flujo, debe existir un Agent local en el LXC del Server configurado contra el servicio `dockpulse-control`. El Server por sí mismo no toca Docker.
+
+Ese Agent debe configurar explícitamente el Compose de control y `deploy/control.env`. La versión se inyecta para esa ejecución; el archivo de entorno en disco no se reescribe.
 
 ## Políticas y labels
 
@@ -142,7 +145,7 @@ El agente rechaza de forma explícita contratos que no puede preservar de manera
 - mounts de tipo desconocido;
 - bindings sin puerto de host estable.
 
-Revisar especialmente aliases o direcciones IP estáticas de red, dispositivos, límites de recursos, healthchecks y opciones de seguridad poco comunes. El MVP no garantiza fidelidad para todo el espacio de configuración de Docker; un dry-run exitoso es necesario, pero no reemplaza una prueba de aplicación.
+Los contratos con aliases personalizados, IPs estáticas, dispositivos, límites de recursos, healthchecks u opciones de seguridad no soportadas bloquean la actualización. El motivo aparece en el inventario y el preflight. Un preview exitoso no reemplaza una prueba de aplicación.
 
 Los datos persisten solo si estaban en bind mounts o volúmenes. El filesystem escribible del contenedor anterior no se migra.
 
@@ -152,10 +155,10 @@ Para scope `service`:
 
 ```text
 docker compose --project-directory <dir> -p <project> pull <service>
-docker compose --project-directory <dir> -p <project> up -d <service>
+docker compose --project-directory <dir> -p <project> up -d --no-deps <service>
 ```
 
-Para scope `stack`, omite el servicio y reconcilia el proyecto completo. Compose puede iniciar o reconciliar dependencias según la definición del proyecto. DockPulse no genera un rollback Compose automático; ante fallo, revisar `docker compose ps`, logs y el archivo Compose antes de intervenir.
+Para scope `stack`, omite el servicio y reconcilia el proyecto completo después de validar sus políticas. El scope `service` no inicia ni recrea dependencias. DockPulse no genera un rollback Compose automático; ante fallo, revisar `docker compose ps`, logs y el archivo Compose antes de intervenir.
 
 ## Jobs, locks y auditoría
 
@@ -166,7 +169,7 @@ Cada acción crea un job con:
 - action, timestamps y resultado;
 - correlation ID y eventos estructurados.
 
-Solo puede existir un job `queued` o `running` por contenedor; con scope stack el lock usa el proyecto completo. Un fallo de dispatch deja el job en `failed` y libera el lock.
+Solo puede existir un job `queued` o `running` por contenedor standalone. Todos los scopes Compose usan un lock por proyecto, para impedir que un stack y uno de sus servicios se actualicen simultáneamente. Un fallo de dispatch deja el job en `failed` y libera el lock.
 
 El agente reintenta la entrega del estado terminal, pero no hay outbox durable ni reconciliación automática en el MVP. Si el control estuvo caído durante todo el final de una operación, el job puede quedar activo aunque Docker haya terminado. Antes de tocar la base:
 

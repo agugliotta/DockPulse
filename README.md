@@ -85,8 +85,8 @@ docker run -d --name whoami \
 1. En **Agents**, confirmar heartbeat e inventario.
 2. Ejecutar **Refresh inventory** para consultar digests de registry.
 3. Abrir el workload y revisar origen, política y razones de seguridad.
-4. Revisar **Update readiness** y ejecutar **Inspect dry run**; los valores de entorno se redactan.
-5. Habilitar escrituras solo cuando corresponda y ejecutar **Update now** después de revisar el dry-run.
+4. Revisar **Update readiness** y, opcionalmente, **Preview changes**; los valores de entorno se redactan.
+5. Habilitar escrituras solo cuando corresponda y ejecutar **Update now** cuando el preflight lo permita.
 6. Seguir cambios e inspecciones desde **Activity** y conservar el resultado para auditoría.
 
 `update_available=false` no siempre significa “imagen actual”: si falta un digest o el registry no respondió, el estado es desconocido. Revisar `detection_method`, digests y `safety_reason`.

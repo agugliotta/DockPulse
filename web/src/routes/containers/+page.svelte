@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { api, imageVersion, short, type Container } from '$lib/api';
   import Status from '$lib/Status.svelte';
+  import ImageStatus from '$lib/ImageStatus.svelte';
   let containers = $state<Container[]>([]);
   let query = $state('');
   let filter = $state('all');
@@ -74,12 +75,13 @@
                     ><span class="version-token target">registry {short(c.remote_digest)}</span>
                   </div>
                   <span class="sub"
-                    >{c.update_available ? 'Registry digest changed' : 'No digest change'}</span
+                    >{!c.current_digest || !c.remote_digest
+                      ? 'Digest comparison unavailable'
+                      : c.update_available
+                        ? 'Registry digest changed'
+                        : 'No digest change'}</span
                   >
-                  {#if c.update_available}<Status
-                      value="update-available"
-                      label="Digest changes"
-                    />{:else}<Status value="healthy" label="Current digest" />{/if}
+                  <ImageStatus container={c} />
                 </div>
               </td><td
                 >{#if c.ignored}<Status value="ignored" />{:else if c.protected || c.sensitive}<Status

@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation';
   import { api, parsePlan, short, since, type Container, type Job, type UpdatePreflight } from '$lib/api';
   import Status from '$lib/Status.svelte';
+  import ImageStatus from '$lib/ImageStatus.svelte';
   let item = $state<Container | null>(null);
   let preflight = $state<UpdatePreflight | null>(null);
   let loading = $state(true);
@@ -140,10 +141,7 @@
         <p>{item.image} · synced {since(item.last_sync)}</p>
       </div>
       <div class="actions">
-        {#if item.update_available}<Status value="update-available" label="Update available" />{:else}<Status
-            value="healthy"
-            label="Current"
-          />{/if}
+        <ImageStatus container={item} />
       </div>
     </header>
     {#if error}<div class="callout errorbox">{error}</div>{/if}{#if item.safety_reason}<div class="callout">
@@ -152,8 +150,18 @@
     <div class="grid stats">
       <div class="stat attn">
         <span class="label">Update posture</span><strong
-          >{item.update_available ? 'Actionable' : 'Current'}</strong
-        ><small>{item.update_available ? 'Registry changed' : 'No image change detected'}</small>
+          >{!item.current_digest || !item.remote_digest
+            ? 'Unknown'
+            : item.update_available
+              ? 'Actionable'
+              : 'Current'}</strong
+        ><small
+          >{!item.current_digest || !item.remote_digest
+            ? 'Refresh inventory to retry digest comparison'
+            : item.update_available
+              ? 'Registry changed'
+              : 'No image change detected'}</small
+        >
       </div>
       <div class="stat">
         <span class="label">Source</span><strong

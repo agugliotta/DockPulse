@@ -20,9 +20,9 @@ El control plane no monta ningún Docker socket. Cada agente es una frontera de 
 
 ## Flujo de actualización
 
-1. La UI solicita un dry-run; el control crea un job y firma la solicitud al agente.
+1. La UI solicita un update confirmado o un preview opcional; el control crea un job y firma la solicitud al agente.
 2. El agente vuelve a inspeccionar el objetivo y aplica sus propias guardas. La autorización no depende de datos viejos del control.
-3. Para Compose ejecuta `pull` y `up -d` con proyecto, directorio y servicio como argumentos separados.
+3. Para Compose ejecuta `pull` y `up -d` con proyecto, directorio, archivos de configuración y servicio como argumentos separados. El scope servicio usa `--no-deps`; el scope stack valida todos los servicios. Ambos comparten un lock por proyecto.
 4. Para `docker run`, hace pull, detiene y renombra el original, crea el reemplazo, conecta redes, arranca y verifica. Ante fallo usa un contexto de recuperación independiente, elimina el reemplazo y restaura el original.
 5. Cada evento vuelve firmado, se persiste y se transmite por SSE.
 

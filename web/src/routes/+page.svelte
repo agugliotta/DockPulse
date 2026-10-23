@@ -48,7 +48,7 @@
   const active = $derived(jobs.filter((j) => ['queued', 'running'].includes(j.status)).length);
   const activityFeed = $derived(orderedJobs.slice(0, 8));
   const share = (value: number, total: number) =>
-    total ? Math.max(6, Math.round((value / total) * 100)) : 0;
+    total && value > 0 ? Math.max(6, Math.round((value / total) * 100)) : 0;
 </script>
 
 {#if loading}<div class="loading"></div>{/if}

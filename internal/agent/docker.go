@@ -56,13 +56,17 @@ type inspectContainer struct {
 		Status string `json:"Status"`
 	} `json:"State"`
 	Config struct {
-		Image      string            `json:"Image"`
-		Labels     map[string]string `json:"Labels"`
-		Env        []string          `json:"Env"`
-		Cmd        []string          `json:"Cmd"`
-		Entrypoint []string          `json:"Entrypoint"`
-		WorkingDir string            `json:"WorkingDir"`
-		User       string            `json:"User"`
+		Image                            string            `json:"Image"`
+		Labels                           map[string]string `json:"Labels"`
+		Env                              []string          `json:"Env"`
+		Cmd                              []string          `json:"Cmd"`
+		Entrypoint                       []string          `json:"Entrypoint"`
+		WorkingDir                       string            `json:"WorkingDir"`
+		User                             string            `json:"User"`
+		Healthcheck                      json.RawMessage   `json:"Healthcheck"`
+		Hostname, Domainname, StopSignal string
+		StopTimeout                      *int
+		Tty, OpenStdin, StdinOnce        bool
 	} `json:"Config"`
 	HostConfig struct {
 		Binds         []string `json:"Binds"`
@@ -75,13 +79,29 @@ type inspectContainer struct {
 			HostIP   string `json:"HostIp"`
 			HostPort string `json:"HostPort"`
 		} `json:"PortBindings"`
-		Privileged      bool `json:"Privileged"`
-		CapAdd, CapDrop []string
-		ReadonlyRootfs  bool              `json:"ReadonlyRootfs"`
-		AutoRemove      bool              `json:"AutoRemove"`
-		PublishAllPorts bool              `json:"PublishAllPorts"`
-		Tmpfs           map[string]string `json:"Tmpfs"`
-		Links           []string          `json:"Links"`
+		Privileged                                                                           bool `json:"Privileged"`
+		CapAdd, CapDrop                                                                      []string
+		ReadonlyRootfs                                                                       bool              `json:"ReadonlyRootfs"`
+		AutoRemove                                                                           bool              `json:"AutoRemove"`
+		PublishAllPorts                                                                      bool              `json:"PublishAllPorts"`
+		Tmpfs                                                                                map[string]string `json:"Tmpfs"`
+		Links                                                                                []string          `json:"Links"`
+		Memory, MemorySwap, MemoryReservation, NanoCpus, CpuShares, CpuQuota, CpuPeriod      int64
+		CpusetCpus, CpusetMems, CgroupParent, Runtime, PidMode, IpcMode, UTSMode, UsernsMode string
+		SecurityOpt, Dns, DnsSearch, DnsOptions, ExtraHosts, GroupAdd                        []string
+		Devices, DeviceRequests, Ulimits                                                     []json.RawMessage
+		Sysctls                                                                              map[string]string
+		ShmSize                                                                              int64
+		PidsLimit                                                                            *int64
+		OomKillDisable                                                                       *bool
+		Init                                                                                 *bool
+		BlkioWeight                                                                          uint16
+		CpuRealtimePeriod, CpuRealtimeRuntime                                                int64
+		StorageOpt                                                                           map[string]string
+		LogConfig                                                                            struct {
+			Type   string
+			Config map[string]string
+		}
 	} `json:"HostConfig"`
 	Mounts []struct {
 		Type, Source, Destination, Name string
@@ -121,6 +141,10 @@ func (d Discovery) Inventory(ctx context.Context, agentID string, checkUpdates b
 	if err = json.Unmarshal(raw, &inspected); err != nil {
 		return inv, fmt.Errorf("decode docker inspect: %w", err)
 	}
+	registryResults := make(map[string]struct {
+		digest string
+		err    error
+	})
 	for _, in := range inspected {
 		c := toContainer(agentID, in, d.AllowedComposeRoots)
 		imgRaw, e := d.Docker.Run(ctx, "image", "inspect", in.Image)
@@ -131,7 +155,12 @@ func (d Discovery) Inventory(ctx context.Context, agentID string, checkUpdates b
 			}
 		}
 		if checkUpdates && d.Registry != nil {
-			remote, e := d.Registry.Digest(ctx, in.Config.Image)
+			result, cached := registryResults[in.Config.Image]
+			if !cached {
+				result.digest, result.err = d.Registry.Digest(ctx, in.Config.Image)
+				registryResults[in.Config.Image] = result
+			}
+			remote, e := result.digest, result.err
 			if e == nil && remote != "" {
 				c.RemoteDigest = remote
 				c.DetectionMethod = "registry-manifest-digest"
@@ -171,6 +200,12 @@ func toContainer(agentID string, in inspectContainer, allowedComposeRoots []stri
 		}
 	} else if !manageable {
 		reason = "docker-run containers require label io.dockpulse.manage=true"
+	}
+	if kind == "docker-run" && manageable {
+		if _, _, err := createArgs(in, strings.TrimPrefix(in.Name, "/")); err != nil {
+			manageable = false
+			reason = err.Error()
+		}
 	}
 	if labels["io.dockpulse.manage"] == "false" {
 		manageable = false

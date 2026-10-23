@@ -243,6 +243,14 @@ func (s *Server) agentEvent(w http.ResponseWriter, r *http.Request, body []byte)
 			problem(w, 500, err.Error())
 			return
 		}
+		e := domain.Event{JobID: ev.ControlJobID, Level: "info", Message: "Job status: " + ev.Status, CreatedAt: time.Now()}
+		id, err := s.store.AddEvent(r.Context(), e)
+		if err != nil {
+			problem(w, 500, err.Error())
+			return
+		}
+		e.ID = id
+		s.publish(e)
 	}
 	writeJSON(w, 202, map[string]string{"status": "accepted"})
 }
@@ -375,7 +383,27 @@ func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, pf)
 		return
 	}
-	writeJSON(w, 200, buildPreflight(c, a, scope))
+	pf := buildPreflight(c, a, scope)
+	if scope == "stack" {
+		if err := s.validateStack(r.Context(), c); err != nil {
+			pf.CanUpdate = false
+			pf.Checks = append(pf.Checks, domain.PreflightCheck{Key: "stack_policy", Label: "Stack policies", Status: "block", Message: err.Error()})
+		}
+	}
+	writeJSON(w, 200, pf)
+}
+
+func (s *Server) validateStack(ctx context.Context, selected domain.Container) error {
+	containers, err := s.store.Containers(ctx, selected.AgentID)
+	if err != nil {
+		return err
+	}
+	for _, c := range containers {
+		if c.ComposeProject == selected.ComposeProject && (c.Ignored || c.Protected || !c.Manageable || (c.Sensitive && c.Labels["io.dockpulse.allow-sensitive"] != "true")) {
+			return fmt.Errorf("stack includes blocked workload %s; review its management policy", c.Name)
+		}
+	}
+	return nil
 }
 
 func resolveScope(c domain.Container, scope string) (string, error) {
@@ -576,8 +604,14 @@ func (s *Server) action(kind string) http.HandlerFunc {
 			problem(w, 409, "agent is offline")
 			return
 		}
+		if kind == "update" && in.Scope == "stack" {
+			if err := s.validateStack(r.Context(), c); err != nil {
+				problem(w, 409, err.Error())
+				return
+			}
+		}
 		target := c.ID
-		if in.Scope == "stack" && c.ComposeProject != "" {
+		if c.ManagementKind == "compose" && c.ComposeProject != "" {
 			target = c.AgentID + ":stack:" + c.ComposeProject
 		}
 		j := domain.Job{ID: store.ID("job"), AgentID: c.AgentID, ContainerID: c.ID, TargetKey: target, Action: kind, Status: domain.StatusQueued, RequestedBy: user(r), CorrelationID: r.Header.Get(auth.HeaderRequest), CreatedAt: time.Now()}
@@ -635,7 +669,11 @@ func (s *Server) agentCall(ctx context.Context, a domain.Agent, method, path str
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(auth.HeaderRequest, store.ID("req"))
 	auth.Sign(req, a.ID, secret, body, time.Now())
-	res, err := s.client.Do(req)
+	client := *s.client
+	if path == "/refresh" {
+		client.Timeout = 100 * time.Second
+	}
+	res, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("agent %s unreachable: %w", a.Name, err)
 	}
@@ -689,15 +727,15 @@ func (s *Server) jobEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
+	ch := make(chan domain.Event, 16)
+	s.subscribe(r.PathValue("id"), ch)
+	defer s.unsubscribe(r.PathValue("id"), ch)
 	after, _ := strconv.ParseInt(r.Header.Get("Last-Event-ID"), 10, 64)
 	existing, _ := s.store.Events(r.Context(), r.PathValue("id"), after)
 	for _, e := range existing {
 		writeSSE(w, e)
 		flusher.Flush()
 	}
-	ch := make(chan domain.Event, 16)
-	s.subscribe(r.PathValue("id"), ch)
-	defer s.unsubscribe(r.PathValue("id"), ch)
 	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
 	for {

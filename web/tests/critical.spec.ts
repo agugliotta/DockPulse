@@ -77,3 +77,66 @@ test('operator sees fleet posture and can preview changes without blocking updat
   await expect(page.getByText('Reconcile Compose service')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Update now' })).toBeEnabled();
 });
+
+test('missing digests show unknown freshness across inventory and details', async ({ page }) => {
+  const unknown = { ...container, remote_digest: '', update_available: false };
+  await page.route('**/api/v1/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/v1/containers' || path === `/api/v1/agents/${agent.id}/containers`)
+      return route.fulfill({ json: [unknown] });
+    if (path === `/api/v1/containers/${container.id}`) return route.fulfill({ json: unknown });
+    if (path === `/api/v1/agents/${agent.id}`) return route.fulfill({ json: agent });
+    return route.fallback();
+  });
+  for (const path of ['/containers', `/containers/${container.id}`, `/agents/${agent.id}`]) {
+    await page.goto(path);
+    await expect(page.getByText('Freshness unknown', { exact: true })).toBeVisible();
+    await expect(page.getByText('Current', { exact: true })).toHaveCount(0);
+  }
+});
+
+test('zero counts have zero-width analytics bars', async ({ page }) => {
+  await page.route('**/api/v1/jobs?*', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 'job-1',
+          action: 'update',
+          status: 'succeeded',
+          target_key: 'app',
+          created_at: new Date().toISOString()
+        }
+      ]
+    })
+  );
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Agent health' })).toBeVisible();
+  const bars = page.locator('.metric-fill.danger');
+  await expect(bars).toHaveCount(2);
+  for (const bar of await bars.all()) await expect(bar).toHaveCSS('width', '0px');
+});
+
+test('terminal status events refresh the job page', async ({ page }) => {
+  let reads = 0;
+  const job = {
+    id: 'job-1',
+    action: 'update',
+    status: 'running',
+    target_key: 'app',
+    requested_by: 'test',
+    created_at: new Date().toISOString()
+  };
+  await page.route('**/api/v1/jobs/job-1**', (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/logs')) return route.fulfill({ json: [] });
+    if (path.endsWith('/events'))
+      return route.fulfill({
+        contentType: 'text/event-stream',
+        body: `id: 1\nevent: log\ndata: ${JSON.stringify({ id: 1, job_id: job.id, level: 'info', message: 'Job status: succeeded', created_at: job.created_at })}\n\n`
+      });
+    reads++;
+    return route.fulfill({ json: { ...job, status: reads === 1 ? 'running' : 'succeeded' } });
+  });
+  await page.goto('/jobs/job-1');
+  await expect(page.locator('.page-head .status')).toHaveText('succeeded');
+});
