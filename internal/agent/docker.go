@@ -81,11 +81,12 @@ type inspectContainer struct {
 		} `json:"PortBindings"`
 		Privileged                                                                           bool `json:"Privileged"`
 		CapAdd, CapDrop                                                                      []string
-		ReadonlyRootfs                                                                       bool              `json:"ReadonlyRootfs"`
-		AutoRemove                                                                           bool              `json:"AutoRemove"`
-		PublishAllPorts                                                                      bool              `json:"PublishAllPorts"`
-		Tmpfs                                                                                map[string]string `json:"Tmpfs"`
-		Links                                                                                []string          `json:"Links"`
+		ReadonlyRootfs                                                                       bool                         `json:"ReadonlyRootfs"`
+		AutoRemove                                                                           bool                         `json:"AutoRemove"`
+		PublishAllPorts                                                                      bool                         `json:"PublishAllPorts"`
+		Tmpfs                                                                                map[string]string            `json:"Tmpfs"`
+		Links                                                                                []string                     `json:"Links"`
+		Mounts                                                                               []map[string]json.RawMessage `json:"Mounts"`
 		Memory, MemorySwap, MemoryReservation, NanoCpus, CpuShares, CpuQuota, CpuPeriod      int64
 		CpusetCpus, CpusetMems, CgroupParent, Runtime, PidMode, IpcMode, UTSMode, UsernsMode string
 		SecurityOpt, Dns, DnsSearch, DnsOptions, ExtraHosts, GroupAdd                        []string
@@ -104,8 +105,8 @@ type inspectContainer struct {
 		}
 	} `json:"HostConfig"`
 	Mounts []struct {
-		Type, Source, Destination, Name string
-		RW                              bool
+		Type, Source, Destination, Name, Propagation string
+		RW                                           bool
 	} `json:"Mounts"`
 	NetworkSettings struct {
 		Networks map[string]json.RawMessage `json:"Networks"`
