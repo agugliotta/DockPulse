@@ -2,18 +2,20 @@
 
 DockPulse centraliza el inventario y las actualizaciones de contenedores Docker distribuidos entre hosts o LXCs de Proxmox. El control plane guarda estado, políticas, jobs y auditoría; cada `dockpulse-agent` solo accede al Docker daemon de su host local.
 
+**Versión estable:** [v0.3.5](https://github.com/agugliotta/DockPulse/releases/tag/v0.3.5). Incluye correcciones de aislamiento entre agentes, actualizaciones Docker y Compose más seguras, mejoras de inventario y estado de jobs, y ajustes de interfaz. Consultar las [notas del release](https://github.com/agugliotta/DockPulse/releases/tag/v0.3.5) para el detalle.
+
 > **Estado del MVP:** actualizaciones manuales con confirmación. El scheduler permanece deshabilitado hasta disponer de ventanas de mantenimiento y healthchecks de aplicación. La UI/API no implementa login propio: debe quedar en una red confiable o detrás de un reverse proxy autenticado.
 
 ## Capacidades
 
 - Múltiples agentes con heartbeat y estados `healthy`, `degraded` y `offline`.
-- Inventario de contenedores `docker run` y proyectos Docker Compose.
+- Inventario de contenedores `docker run` y proyectos Docker Compose, aislado por agente.
 - Comparación de digests con Docker Hub y Registry v2 anónimo.
 - Dry-run y actualización por contenedor, servicio Compose o stack.
 - Preflight por workload con checks de agent, scope, políticas, contrato y digest.
-- Recreación conservadora de `docker run`, rollback del contenedor anterior y preservación de mounts soportados.
+- Recreación conservadora de `docker run`, rollback ante fallos y preservación de mounts soportados, memoria compartida y configuración de logging.
 - Opt-in, ignore/protect, clasificación sensible y modo read-only.
-- Lock persistente por contenedor o stack, historial auditable y logs vía SSE.
+- Lock persistente por contenedor standalone o proyecto Compose, historial auditable y estado/logs de jobs vía SSE.
 - Go, SQLite WAL con migraciones, SvelteKit y despliegue con Docker Compose.
 
 ## Antes de instalar
@@ -49,13 +51,35 @@ Las instalaciones de Proxmox descargan imágenes privadas y versionadas desde Gi
 - `ghcr.io/agugliotta/dockpulse-control:<version>`
 - `ghcr.io/agugliotta/dockpulse-agent:<version>`
 
+Las imágenes publicadas son para `linux/amd64`. La descarga requiere autenticación en GHCR, como explica la [guía de instalación](docs/installation.md).
+
 Las imágenes se publican al crear tags `vX.Y.Z`. También se publica `latest` para instalaciones que prefieren seguir el release más reciente:
 
-- `DOCKPULSE_VERSION=0.3.0` fija explícitamente la versión desplegada y facilita rollback.
+- `DOCKPULSE_VERSION=0.3.5` fija explícitamente la versión desplegada y facilita volver a una imagen anterior.
 - `DOCKPULSE_VERSION=latest` hace que `docker compose pull` resuelva el release más nuevo publicado.
 - `DOCKPULSE_UPDATE_VERSION` indica en la UI/API a qué tag se intentará actualizar; por defecto se recomienda `latest`.
 
 La página **System** muestra la versión actual del control plane, la versión reportada por cada agent y el target configurado.
+
+## Actualizar a v0.3.5
+
+Para instalaciones existentes, respaldar SQLite y conservar `DOCKPULSE_ENCRYPTION_KEY`. En cada host, configurar `DOCKPULSE_VERSION=0.3.5` en el archivo de entorno correspondiente; los archivos `.env.example` pueden apuntar a una versión anterior.
+
+En el LXC Server, desde la carpeta de DockPulse:
+
+```bash
+docker compose --env-file deploy/control.env -f deploy/docker-compose.control.yml pull
+docker compose --env-file deploy/control.env -f deploy/docker-compose.control.yml up -d
+```
+
+En cada LXC Agent, desde la carpeta de DockPulse:
+
+```bash
+docker compose --env-file deploy/agent.env -f deploy/docker-compose.agent.yml pull
+docker compose --env-file deploy/agent.env -f deploy/docker-compose.agent.yml up -d
+```
+
+Verificar en **System** que Server y Agents reporten `0.3.5`, y comprobar heartbeat e inventario antes de actualizar workloads. Para self-update y recuperación, consultar la [guía de operación](docs/operations.md#versiones-y-self-update).
 
 ## Política de administración
 
@@ -106,6 +130,14 @@ npm run test:e2e
 ```
 
 También se puede ejecutar `make test` cuando las dependencias ya están instaladas.
+
+Con un daemon Docker local disponible, ejecutar las pruebas de integración de actualizaciones, rollback y aislamiento de servicios Compose:
+
+```bash
+DOCKPULSE_DOCKER_TESTS=1 go test -race -count=1 -timeout 5m ./internal/agent -run TestDockerIntegration
+```
+
+Estas pruebas crean y eliminan recursos temporales de Docker y también se ejecutan en CI.
 
 ## Layout
 
