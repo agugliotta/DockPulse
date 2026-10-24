@@ -99,6 +99,22 @@ func TestComposeServiceValidatesItsCurrentConfiguration(t *testing.T) {
 	}
 }
 
+func TestComposeServiceConfigTargetsProfiledService(t *testing.T) {
+	dir := t.TempDir()
+	in := inspectContainer{}
+	in.Config.Labels = map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "tool", "com.docker.compose.project.working_dir": dir}
+	u := Updater{AllowedComposeRoots: []string{dir}, Docker: runFunc(func(_ context.Context, args ...string) ([]byte, error) {
+		if !strings.HasSuffix(strings.Join(args, " "), "config --format json tool") {
+			t.Fatalf("profiled service was not explicitly selected: %v", args)
+		}
+		return []byte(`{"services":{"tool":{"image":"alpine:3.22","profiles":["maintenance"]}}}`), nil
+	})}
+	plan, err := u.composePlan(t.Context(), in, "service")
+	if err != nil || plan.Target != "app/tool" {
+		t.Fatalf("profiled service rejected: %+v %v", plan, err)
+	}
+}
+
 func TestSelfUpdateUsesDeploymentFiles(t *testing.T) {
 	for _, custom := range []bool{false, true} {
 		r := &recordingRunner{}

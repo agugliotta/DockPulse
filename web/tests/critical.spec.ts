@@ -140,3 +140,15 @@ test('terminal status events refresh the job page', async ({ page }) => {
   await page.goto('/jobs/job-1');
   await expect(page.locator('.page-head .status')).toHaveText('succeeded');
 });
+
+test('browser tab loads the DockPulse favicon', async ({ page, request }) => {
+  await page.goto('/');
+  const icon = page.locator('link[rel="icon"]');
+  await expect(icon).toHaveAttribute('type', 'image/svg+xml');
+  const href = await icon.getAttribute('href');
+  expect(href).toBeTruthy();
+  const response = await request.get(href!);
+  expect(response.ok()).toBeTruthy();
+  expect(response.headers()['content-type']).toContain('image/svg+xml');
+  expect(await response.text()).toContain('<svg');
+});

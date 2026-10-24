@@ -58,8 +58,8 @@ func TestCreateArgsMatchesBindDestinationsExactly(t *testing.T) {
 	in.Config.Image = "example/app:1"
 	in.HostConfig.Binds = []string{"host:/data2"}
 	in.Mounts = append(in.Mounts, struct {
-		Type, Source, Destination, Name string
-		RW                              bool
+		Type, Source, Destination, Name, Propagation string
+		RW                                           bool
 	}{Type: "volume", Name: "data", Destination: "/data", RW: true})
 	args, _, err := createArgs(in, "app")
 	if err != nil {
@@ -115,5 +115,61 @@ func TestSelfUpdateInjectsRequestedVersion(t *testing.T) {
 	wantEnv := []string{"DOCKPULSE_VERSION=latest", "DOCKPULSE_UPDATE_VERSION=latest"}
 	if len(runner.envs) != 2 || !reflect.DeepEqual(runner.envs[0], wantEnv) || !reflect.DeepEqual(runner.envs[1], wantEnv) {
 		t.Fatalf("self-update did not inject target version: %+v", runner.envs)
+	}
+}
+
+func TestCreateArgsPreservesDaemonSettings(t *testing.T) {
+	for _, driver := range []string{"json-file", "local", "splunk"} {
+		t.Run(driver, func(t *testing.T) {
+			var in inspectContainer
+			in.Config.Image = "alpine:3.22"
+			in.HostConfig.ShmSize = 4199546880
+			in.HostConfig.LogConfig.Type = driver
+			in.HostConfig.LogConfig.Config = map[string]string{"max-size": "20m", "token": "secret"}
+			args, _, err := createArgs(in, "app")
+			if err != nil {
+				t.Fatal(err)
+			}
+			joined := strings.Join(args, " ")
+			for _, want := range []string{"--shm-size 4199546880", "--log-driver " + driver, "--log-opt max-size=20m", "--log-opt token=secret"} {
+				if !strings.Contains(joined, want) {
+					t.Fatalf("missing %q in %s", want, joined)
+				}
+			}
+			if strings.Contains(strings.Join(redactArgs(args), " "), "secret") {
+				t.Fatal("logging secret exposed by preview")
+			}
+		})
+	}
+}
+
+func TestStructuredBindMountPreservesPropagationAndReadOnly(t *testing.T) {
+	var in inspectContainer
+	if err := json.Unmarshal([]byte(`{"Config":{"Image":"alpine"},"HostConfig":{"Mounts":[{"Type":"bind","Source":"/mnt","Target":"/data","ReadOnly":true,"BindOptions":{"Propagation":"rshared"}}]},"Mounts":[{"Type":"bind","Source":"/mnt","Destination":"/data","RW":false,"Propagation":"rshared"}]}`), &in); err != nil {
+		t.Fatal(err)
+	}
+	args, _, err := createArgs(in, "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(args, " "), "--volume /mnt:/data:ro,rshared") {
+		t.Fatalf("mount settings lost: %v", args)
+	}
+}
+
+func TestUnsupportedStructuredMountOptionsBlockRecreation(t *testing.T) {
+	for _, mount := range []string{
+		`{"Type":"bind","BindOptions":{"NonRecursive":true}}`,
+		`{"Type":"volume","VolumeOptions":{"NoCopy":true}}`,
+		`{"Type":"volume","VolumeOptions":{"Subpath":"data"}}`,
+		`{"Type":"tmpfs"}`,
+	} {
+		var in inspectContainer
+		if err := json.Unmarshal([]byte(`{"HostConfig":{"Mounts":[`+mount+`]}}`), &in); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := createArgs(in, "app"); err == nil {
+			t.Fatalf("unsupported mount accepted: %s", mount)
+		}
 	}
 }

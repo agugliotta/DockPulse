@@ -149,6 +149,8 @@ Los contratos con aliases personalizados, IPs estáticas, dispositivos, límites
 
 Los datos persisten solo si estaban en bind mounts o volúmenes. El filesystem escribible del contenedor anterior no se migra.
 
+La recreación conserva la propagación de bind mounts, su modo read-only, el tamaño de memoria compartida y el driver/opciones de logging, incluso cuando provienen de los defaults del daemon. Las opciones avanzadas de mounts que todavía no pueden reconstruirse se rechazan antes de detener el contenedor. Los valores de las opciones de logging se redactan en el preview.
+
 ### Docker Compose
 
 Para scope `service`:

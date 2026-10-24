@@ -178,7 +178,11 @@ func (u Updater) composePlan(ctx context.Context, in inspectContainer, scope str
 		return Plan{}, fmt.Errorf("Compose scope must be service or stack")
 	}
 	base := composeArgs(in)
-	raw, err := u.Docker.Run(ctx, append(base, "config", "--format", "json")...)
+	configArgs := append(base, "config", "--format", "json")
+	if scope == "service" {
+		configArgs = append(configArgs, service)
+	}
+	raw, err := u.Docker.Run(ctx, configArgs...)
 	if err != nil {
 		return Plan{}, fmt.Errorf("enumerate Compose services: %w", err)
 	}
@@ -314,8 +318,15 @@ func createArgs(in inspectContainer, name string) ([]string, []string, error) {
 			source = m.Name
 		}
 		spec := source + ":" + m.Destination
+		var modes []string
 		if !m.RW {
-			spec += ":ro"
+			modes = append(modes, "ro")
+		}
+		if m.Type == "bind" && m.Propagation != "" {
+			modes = append(modes, m.Propagation)
+		}
+		if len(modes) > 0 {
+			spec += ":" + strings.Join(modes, ",")
 		}
 		a = append(a, "--volume", spec)
 	}
@@ -367,6 +378,20 @@ func createArgs(in inspectContainer, name string) ([]string, []string, error) {
 	for _, c := range in.HostConfig.CapDrop {
 		a = append(a, "--cap-drop", c)
 	}
+	if in.HostConfig.ShmSize > 0 {
+		a = append(a, "--shm-size", strconv.FormatInt(in.HostConfig.ShmSize, 10))
+	}
+	if in.HostConfig.LogConfig.Type != "" {
+		a = append(a, "--log-driver", in.HostConfig.LogConfig.Type)
+	}
+	logKeys := make([]string, 0, len(in.HostConfig.LogConfig.Config))
+	for key := range in.HostConfig.LogConfig.Config {
+		logKeys = append(logKeys, key)
+	}
+	sort.Strings(logKeys)
+	for _, key := range logKeys {
+		a = append(a, "--log-opt", key+"="+in.HostConfig.LogConfig.Config[key])
+	}
 	if in.Config.WorkingDir != "" {
 		a = append(a, "--workdir", in.Config.WorkingDir)
 	}
@@ -414,7 +439,7 @@ func validateRunContract(in inspectContainer) error {
 	if h.Memory != 0 || h.MemorySwap != 0 || h.MemoryReservation != 0 || h.NanoCpus != 0 || h.CpuShares != 0 || h.CpuQuota != 0 || h.CpuPeriod != 0 || h.CpusetCpus != "" || h.CpusetMems != "" || h.CgroupParent != "" || len(h.Ulimits) > 0 {
 		return fmt.Errorf("resource limits cannot yet be preserved safely")
 	}
-	if len(h.Devices) > 0 || len(h.DeviceRequests) > 0 || len(h.SecurityOpt) > 0 || len(h.Sysctls) > 0 || len(h.GroupAdd) > 0 || h.UsernsMode != "" || h.UTSMode != "" || h.PidMode != "" || (h.Runtime != "" && h.Runtime != "runc") || (h.IpcMode != "" && h.IpcMode != "private") || (h.ShmSize != 0 && h.ShmSize != 64<<20) {
+	if len(h.Devices) > 0 || len(h.DeviceRequests) > 0 || len(h.SecurityOpt) > 0 || len(h.Sysctls) > 0 || len(h.GroupAdd) > 0 || h.UsernsMode != "" || h.UTSMode != "" || h.PidMode != "" || (h.Runtime != "" && h.Runtime != "runc") || (h.IpcMode != "" && h.IpcMode != "private") {
 		return fmt.Errorf("device, security or namespace settings cannot yet be preserved safely")
 	}
 	if len(h.Dns) > 0 || len(h.DnsSearch) > 0 || len(h.DnsOptions) > 0 || len(h.ExtraHosts) > 0 {
@@ -443,8 +468,30 @@ func validateRunContract(in inspectContainer) error {
 			}
 		}
 	}
-	if len(h.LogConfig.Config) > 0 || (h.LogConfig.Type != "" && h.LogConfig.Type != "json-file") {
-		return fmt.Errorf("custom logging settings cannot yet be preserved safely")
+	for _, mount := range h.Mounts {
+		if string(mount["Type"]) != `"bind"` && string(mount["Type"]) != `"volume"` {
+			return fmt.Errorf("structured mount type %s cannot yet be preserved safely", mount["Type"])
+		}
+		for key, value := range mount {
+			switch key {
+			case "Type", "Source", "Target", "ReadOnly":
+				continue
+			case "BindOptions":
+				var options map[string]json.RawMessage
+				if err := json.Unmarshal(value, &options); err != nil {
+					return fmt.Errorf("invalid bind options: %w", err)
+				}
+				for option, setting := range options {
+					if option != "Propagation" && string(setting) != "false" && string(setting) != "null" {
+						return fmt.Errorf("bind option %s cannot yet be preserved safely", option)
+					}
+				}
+			default:
+				if string(value) != "null" && string(value) != "{}" && string(value) != `""` {
+					return fmt.Errorf("mount option %s cannot yet be preserved safely", key)
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -494,7 +541,7 @@ func networkPlan(in inspectContainer) (string, []string) {
 func redactArgs(args []string) []string {
 	out := append([]string{}, args...)
 	for i := 0; i < len(out)-1; i++ {
-		if out[i] == "--env" {
+		if out[i] == "--env" || out[i] == "--log-opt" {
 			key := strings.SplitN(out[i+1], "=", 2)[0]
 			out[i+1] = key + "=<redacted>"
 		}
