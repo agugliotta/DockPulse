@@ -37,8 +37,10 @@ func (f *fakeRunner) Run(_ context.Context, args ...string) ([]byte, error) {
 }
 
 func TestDiscoveryClassifiesComposeAndSensitiveWorkloads(t *testing.T) {
+	dir := t.TempDir()
 	f := &fakeRunner{responses: map[string]string{"ps -aq": "abc\n", "inspect abc": `[{"Id":"abc","Name":"/db","Image":"imgid","State":{"Status":"running"},"Config":{"Image":"postgres:16","Labels":{"com.docker.compose.project":"core","com.docker.compose.service":"db","com.docker.compose.project.working_dir":"/opt/stacks/core"}},"HostConfig":{},"Mounts":[],"NetworkSettings":{"Networks":{}}}]`, "image inspect imgid": `[{"RepoDigests":["postgres@sha256:aaa"]}]`}}
-	inv, err := (Discovery{Docker: f}).Inventory(context.Background(), "lxc-101", false)
+	f.responses["inspect abc"] = strings.ReplaceAll(f.responses["inspect abc"], "/opt/stacks/core", dir)
+	inv, err := (Discovery{Docker: f, AllowedComposeRoots: []string{dir}}).Inventory(context.Background(), "lxc-101", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,11 +48,11 @@ func TestDiscoveryClassifiesComposeAndSensitiveWorkloads(t *testing.T) {
 		t.Fatalf("got %d containers", len(inv.Containers))
 	}
 	c := inv.Containers[0]
-	if c.ManagementKind != "compose" || !c.Sensitive || c.Manageable {
+	if c.ManagementKind != "compose" || !c.Sensitive || !c.Manageable {
 		t.Fatalf("unexpected classification: %+v", c)
 	}
-	if !strings.Contains(c.SafetyReason, "sensitive workload") {
-		t.Fatalf("missing safety reason: %s", c.SafetyReason)
+	if c.SafetyReason != "" {
+		t.Fatalf("sensitivity must not hide contract readiness: %s", c.SafetyReason)
 	}
 }
 

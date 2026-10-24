@@ -2,9 +2,10 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
-  import { api, parsePlan, short, since, type Container, type Job, type UpdatePreflight } from '$lib/api';
+  import { api, parsePlan, since, type Container, type Job, type UpdatePreflight } from '$lib/api';
   import Status from '$lib/Status.svelte';
   import ImageStatus from '$lib/ImageStatus.svelte';
+  import { allowsSensitiveUpdates } from '$lib/api';
   let item = $state<Container | null>(null);
   let preflight = $state<UpdatePreflight | null>(null);
   let loading = $state(true);
@@ -15,7 +16,10 @@
   let dryRunScope = $state('');
   let dryRunOpen = $state(false);
   const previewSeen = $derived(Boolean((dryRunPlan || dryRunText) && dryRunScope === scope));
-  const updateReady = $derived(Boolean(preflight?.can_update));
+  const policyBlocked = $derived(
+    Boolean(item && (item.ignored || item.protected || (item.sensitive && !allowsSensitiveUpdates(item))))
+  );
+  const updateReady = $derived(!loading && Boolean(preflight?.can_update));
   const blockers = $derived(preflight?.checks.filter((check) => check.status === 'block') ?? []);
   const updateState = $derived(
     !preflight ? 'loading' : !preflight.can_update ? 'preflight-blocked' : 'ready'
@@ -56,6 +60,7 @@
   }
   async function changeScope(nextScope: string) {
     scope = nextScope;
+    preflight = null;
     dryRunPlan = null;
     dryRunText = '';
     dryRunScope = '';
@@ -69,6 +74,12 @@
   }
   async function flag(action: string) {
     loading = true;
+    error = '';
+    preflight = null;
+    dryRunPlan = null;
+    dryRunText = '';
+    dryRunScope = '';
+    dryRunOpen = false;
     try {
       item = await api<Container>(`/containers/${page.params.id}/${action}`, { method: 'POST', body: '{}' });
       await loadPreflight(scope);
@@ -169,8 +180,14 @@
         ><small>{item.compose_project || item.agent_id}</small>
       </div>
       <div class="stat">
-        <span class="label">Policy</span><strong>{item.manageable ? 'Managed' : 'Review'}</strong><small
-          >{item.ignored || item.protected ? 'Flagged by policy' : 'Eligible for preview'}</small
+        <span class="label">Policy</span><strong
+          >{policyBlocked ? 'Blocked' : item.manageable ? 'Managed' : 'Review'}</strong
+        ><small
+          >{policyBlocked
+            ? 'Updates blocked · review Management policy'
+            : item.manageable
+              ? 'Eligible for preview'
+              : 'Review workload contract'}</small
         >
       </div>
       <div class="stat">
@@ -190,38 +207,57 @@
           <dd class="mono">{item.image}</dd>
           <dt>Agent</dt>
           <dd><a href={`/agents/${item.agent_id}`}>{item.agent_id}</a></dd>
+          <dt>Image comparison</dt>
+          <dd>
+            {#if !item.current_digest || !item.remote_digest}
+              Could not compare the installed image with the registry. Refresh the agent's inventory to retry.
+            {:else if item.update_available}
+              The registry image differs from the installed image. Review Update readiness below before
+              updating.
+            {:else}
+              The installed image matches the registry image at the last check.
+            {/if}
+          </dd>
         </dl>
         <details class="tech-fold">
-          <summary>Show technical signals</summary>
-          <div class="tech-grid">
-            <div>
-              <span>Local digest</span>
-              <strong class="mono">{short(item.current_digest)}</strong>
-              <small>{item.current_digest || 'Unavailable'}</small>
-            </div>
-            <div>
-              <span>Registry digest</span>
-              <strong class="mono">{short(item.remote_digest)}</strong>
-              <small>{item.remote_digest || 'Not evaluated'}</small>
-            </div>
-            <div>
-              <span>Docker ID</span>
-              <strong class="mono">{item.docker_id}</strong>
-            </div>
-            <div>
-              <span>Detection</span>
-              <strong>{item.detection_method || 'No registry result'}</strong>
-            </div>
-          </div>
+          <summary>Troubleshooting details</summary>
+          <p>
+            Image fingerprints identify the exact image content used in this comparison. The container ID
+            helps locate this container in Docker logs and commands.
+          </p>
+          <dl class="detail-list">
+            <dt>Installed image fingerprint</dt>
+            <dd><code>{item.current_digest || 'Unavailable'}</code></dd>
+            <dt>Registry image fingerprint</dt>
+            <dd><code>{item.remote_digest || 'Not evaluated'}</code></dd>
+            <dt>Container ID</dt>
+            <dd><code>{item.docker_id}</code></dd>
+          </dl>
         </details>
       </section>
       <section class="panel">
         <div class="panel-head"><h2>Management policy</h2></div>
+        {#if item.sensitive}
+          <div class="sensitive-policy">
+            <strong>Data service updates</strong>
+            <button
+              class="btn"
+              role="switch"
+              aria-label="Allow updates for this data service"
+              aria-checked={allowsSensitiveUpdates(item)}
+              disabled={loading}
+              onclick={() => flag(allowsSensitiveUpdates(item!) ? 'block-sensitive' : 'allow-sensitive')}
+            >
+              {allowsSensitiveUpdates(item) ? 'Allowed · click to block' : 'Blocked · click to allow'}
+            </button>
+            <p>Applies only to this service. Allowing updates does not start an update.</p>
+          </div>
+        {/if}
         <dl class="detail-list">
           <dt>Manageable</dt>
           <dd>{item.manageable ? 'Yes' : 'No'}</dd>
-          <dt>Sensitive</dt>
-          <dd>{item.sensitive ? 'Yes · explicit opt-in required' : 'No'}</dd>
+          <dt>Data service</dt>
+          <dd>{item.sensitive ? 'Yes · updates require permission' : 'No'}</dd>
           <dt>Ignored</dt>
           <dd>{item.ignored ? 'Yes' : 'No'}</dd>
           <dt>Protected</dt>
@@ -359,3 +395,23 @@
       </div>
     </section>{/if}
 </section>
+
+<style>
+  .sensitive-policy {
+    padding: 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  .sensitive-policy strong {
+    display: block;
+    margin-bottom: 10px;
+  }
+  .sensitive-policy .btn {
+    width: 100%;
+  }
+  .sensitive-policy p {
+    margin: 10px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+</style>

@@ -4,6 +4,8 @@ DockPulse centraliza el inventario y las actualizaciones de contenedores Docker 
 
 **Versión estable:** [v0.3.5](https://github.com/agugliotta/DockPulse/releases/tag/v0.3.5). Incluye correcciones de aislamiento entre agentes, actualizaciones Docker y Compose más seguras, mejoras de inventario y estado de jobs, y ajustes de interfaz. Consultar las [notas del release](https://github.com/agugliotta/DockPulse/releases/tag/v0.3.5) para el detalle.
 
+**Cambios posteriores a v0.3.5:** el código de `main` incorpora las mejoras de interfaz y permisos descritas abajo. Para usarlas en una instalación existente se necesita una imagen que incluya estos cambios; actualizar el manager y los agentes, y refrescar el inventario. Mergear código no publica imágenes: el workflow de publicación se ejecuta al crear un tag de release.
+
 > **Estado del MVP:** actualizaciones manuales con confirmación. El scheduler permanece deshabilitado hasta disponer de ventanas de mantenimiento y healthchecks de aplicación. La UI/API no implementa login propio: debe quedar en una red confiable o detrás de un reverse proxy autenticado.
 
 ## Capacidades
@@ -15,6 +17,8 @@ DockPulse centraliza el inventario y las actualizaciones de contenedores Docker 
 - Preflight por workload con checks de agent, scope, políticas, contrato y digest.
 - Recreación conservadora de `docker run`, rollback ante fallos y preservación de mounts soportados, memoria compartida y configuración de logging.
 - Opt-in, ignore/protect, clasificación sensible y modo read-only.
+- Permitir o bloquear actualizaciones de servicios con datos desde el manager, sin editar los archivos de los agentes.
+- Versión instalada y último release estable separados, estado de actualización por componente y conexión del control verificada.
 - Lock persistente por contenedor standalone o proyecto Compose, historial auditable y estado/logs de jobs vía SSE.
 - Go, SQLite WAL con migraciones, SvelteKit y despliegue con Docker Compose.
 
@@ -59,7 +63,11 @@ Las imágenes se publican al crear tags `vX.Y.Z`. También se publica `latest` p
 - `DOCKPULSE_VERSION=latest` hace que `docker compose pull` resuelva el release más nuevo publicado.
 - `DOCKPULSE_UPDATE_VERSION` indica en la UI/API a qué tag se intentará actualizar; por defecto se recomienda `latest`.
 
-La página **System** muestra la versión actual del control plane, la versión reportada por cada agent y el target configurado.
+La página **System** distingue la versión instalada del control plane, la versión reportada por cada agente, el último release estable publicado en GitHub y el destino configurado. Muestra **Update available**, **Up to date** o **Version unverified**, con enlace a las notas del release. Si falla la consulta, no afirma que la instalación esté al día.
+
+Con `DOCKPULSE_UPDATE_VERSION=latest`, el botón muestra el número concreto verificado, por ejemplo **Update to 0.3.5**. Un destino fijo se respeta aunque exista un release posterior; no se ofrece reinstalar la misma versión ni bajar a una anterior. La consulta tiene cache de 5 minutos y verifica releases publicados, no la disponibilidad de imágenes en GHCR.
+
+El pie de la barra lateral muestra la versión real del binario de control, sin un número fijo. Comprueba su conexión al abrir la aplicación y cada 30 segundos; si falla, indica **Control unreachable**. El indicador abre **System**. Actualizar agentes no actualiza automáticamente el servidor: el control requiere su propio despliegue o un agente local configurado para su servicio.
 
 ## Actualizar a v0.3.5
 
@@ -89,10 +97,14 @@ La detección es amplia; la mutación es opt-in y conservadora:
 | --------------------------------------- | ----------------------------------------------------------------------------------- |
 | Docker Compose                          | Metadata completa y working directory accesible dentro de `DOCKPULSE_COMPOSE_ROOTS` |
 | `docker run`                            | Label `io.dockpulse.manage=true` y contrato reconstruible                           |
-| Base de datos/cache o workload sensible | Además, label `io.dockpulse.allow-sensitive=true`                                   |
+| Base de datos/cache o workload sensible | Autorizar en **Management policy** desde el manager; también admite label `io.dockpulse.allow-sensitive=true` |
 | Cualquier workload                      | No estar ignored/protected y agente fuera de read-only                              |
 
 `io.dockpulse.manage=false` siempre deshabilita la ejecución. `io.dockpulse.sensitive=true` fuerza la clasificación sensible.
+
+En **Inventory → servicio → Management policy**, **Data service updates** permite autorizar o bloquear actualizaciones de un servicio sensible. Esta decisión se guarda en el manager y se conserva tras reinicios y recreaciones que mantienen el nombre del contenedor en el mismo agente. Habilitar el permiso no inicia una actualización.
+
+La decisión del manager tiene prioridad sobre `io.dockpulse.allow-sensitive`: bloquear desde la UI también bloquea servicios cuyo label lo permitía. Sin una decisión central se conserva el comportamiento del label. El inventario distingue **Updates allowed** y **Updates blocked**. La autorización se envía al agente en la solicitud firmada, se limita al servicio seleccionado y no elimina las demás protecciones. Para actualizar un stack, cada servicio sensible necesita su propia autorización.
 
 Ejemplo de `docker run` administrable:
 
@@ -108,12 +120,12 @@ docker run -d --name whoami \
 
 1. En **Agents**, confirmar heartbeat e inventario.
 2. Ejecutar **Refresh inventory** para consultar digests de registry.
-3. Abrir el workload y revisar origen, política y razones de seguridad.
+3. Abrir el workload y revisar origen, política y comparación de imágenes. Para servicios sensibles, habilitar el permiso en **Management policy** solo cuando corresponda.
 4. Revisar **Update readiness** y, opcionalmente, **Preview changes**; los valores de entorno se redactan.
 5. Habilitar escrituras solo cuando corresponda y ejecutar **Update now** cuando el preflight lo permita.
 6. Seguir cambios e inspecciones desde **Activity** y conservar el resultado para auditoría.
 
-`update_available=false` no siempre significa “imagen actual”: si falta un digest o el registry no respondió, el estado es desconocido. Revisar `detection_method`, digests y `safety_reason`.
+`update_available=false` no siempre significa “imagen actual”: si falta un digest o el registry no respondió, el estado es desconocido. La card **Image & runtime** explica si las imágenes coinciden, difieren o no pudieron compararse. **Troubleshooting details** conserva los identificadores completos de imagen y contenedor para diagnóstico, cerrado por defecto; no hace falta interpretar hashes para decidir si hay un cambio.
 
 ## Desarrollo y pruebas
 

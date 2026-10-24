@@ -28,6 +28,7 @@ export type Container = {
   ignored: boolean;
   protected: boolean;
   sensitive: boolean;
+  sensitive_updates_allowed?: boolean | null;
   manageable: boolean;
   safety_reason?: string;
   last_sync: string;
@@ -52,6 +53,7 @@ export type JobEvent = { id: number; job_id: string; level: string; message: str
 export type SystemInfo = {
   version: string;
   target_version: string;
+  release: { version: string; checked_at: string; error?: string };
   agents: Agent[];
 };
 export type PreflightCheck = {
@@ -85,6 +87,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T;
 }
 export const short = (v?: string) => (v ? v.replace('sha256:', '').slice(0, 12) : '—');
+export const allowsSensitiveUpdates = (c: Container) =>
+  c.sensitive_updates_allowed ?? c.labels?.['io.dockpulse.allow-sensitive'] === 'true';
 export const imageVersion = (c: Container) => c.tag || c.image.split(':').at(-1) || 'latest';
 export const jobActionLabel = (action: string) => {
   if (action === 'dry-run') return 'Preview';

@@ -59,7 +59,7 @@ func TestComposeStackValidatesEveryService(t *testing.T) {
 		in.Config.Labels = map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "web", "com.docker.compose.project.working_dir": dir}
 		config := `{"services":{"web":{"image":"nginx"},"db":{"image":"postgres:16","labels":` + labels + `}}}`
 		u := Updater{AllowedComposeRoots: []string{dir}, Docker: runFunc(func(_ context.Context, args ...string) ([]byte, error) { return []byte(config), nil })}
-		if _, err := u.composePlan(t.Context(), in, "stack"); err == nil {
+		if _, err := u.composePlan(t.Context(), in, "stack", nil); err == nil {
 			t.Fatal("stack accepted disallowed database")
 		}
 	}
@@ -92,7 +92,7 @@ func TestComposeServiceValidatesItsCurrentConfiguration(t *testing.T) {
 		{`{"services":{"other":{"image":"nginx"}}}`, false},
 	} {
 		u := Updater{AllowedComposeRoots: []string{dir}, Docker: runFunc(func(context.Context, ...string) ([]byte, error) { return []byte(tc.config), nil })}
-		_, err := u.composePlan(t.Context(), in, "service")
+		_, err := u.composePlan(t.Context(), in, "service", nil)
 		if (err == nil) != tc.allowed {
 			t.Fatalf("config %s: %v", tc.config, err)
 		}
@@ -109,7 +109,7 @@ func TestComposeServiceConfigTargetsProfiledService(t *testing.T) {
 		}
 		return []byte(`{"services":{"tool":{"image":"alpine:3.22","profiles":["maintenance"]}}}`), nil
 	})}
-	plan, err := u.composePlan(t.Context(), in, "service")
+	plan, err := u.composePlan(t.Context(), in, "service", nil)
 	if err != nil || plan.Target != "app/tool" {
 		t.Fatalf("profiled service rejected: %+v %v", plan, err)
 	}

@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, imageVersion, short, type Container } from '$lib/api';
+  import { api, imageVersion, short, allowsSensitiveUpdates, type Container } from '$lib/api';
   import Status from '$lib/Status.svelte';
+  import PolicyStatus from '$lib/PolicyStatus.svelte';
   import ImageStatus from '$lib/ImageStatus.svelte';
   let containers = $state<Container[]>([]);
   let query = $state('');
@@ -23,7 +24,7 @@
         (!query || `${c.name} ${c.image} ${c.compose_project}`.toLowerCase().includes(query.toLowerCase())) &&
         (filter === 'all' ||
           (filter === 'updates' && c.update_available) ||
-          (filter === 'protected' && (c.protected || c.sensitive)) ||
+          (filter === 'protected' && (c.protected || (c.sensitive && !allowsSensitiveUpdates(c)))) ||
           (filter === 'ignored' && c.ignored))
     )
   );
@@ -83,14 +84,7 @@
                   >
                   <ImageStatus container={c} />
                 </div>
-              </td><td
-                >{#if c.ignored}<Status value="ignored" />{:else if c.protected || c.sensitive}<Status
-                    value="protected"
-                  />{:else if c.manageable}<Status value="healthy" label="Managed" />{:else}<Status
-                    value="degraded"
-                    label="Review"
-                  />{/if}<span class="sub">{c.management_kind}</span></td
-              ></tr
+              </td><td><PolicyStatus container={c} /><span class="sub">{c.management_kind}</span></td></tr
             >{:else}<tr><td colspan="5" class="empty">No containers match this view.</td></tr>{/each}</tbody
         >
       </table>

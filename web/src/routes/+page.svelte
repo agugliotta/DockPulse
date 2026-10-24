@@ -11,6 +11,7 @@
     type Job
   } from '$lib/api';
   import Status from '$lib/Status.svelte';
+  import PolicyStatus from '$lib/PolicyStatus.svelte';
   let agents = $state<Agent[]>([]);
   let containers = $state<Container[]>([]);
   let jobs = $state<Job[]>([]);
@@ -214,15 +215,7 @@
                 ><Status value="update-available" label="Update" /><span class="sub"
                   >{c.detection_method}</span
                 ></td
-              ><td
-                >{#if c.sensitive}<Status
-                    value="protected"
-                    label="Sensitive"
-                  />{:else if !c.manageable}<Status value="ignored" label="Review" />{:else}<Status
-                    value="healthy"
-                    label="Eligible"
-                  />{/if}</td
-              ></tr
+              ><td><PolicyStatus container={c} /></td></tr
             >{:else}<tr><td colspan="4" class="empty">No actionable image updates detected.</td></tr
             >{/each}</tbody
         >

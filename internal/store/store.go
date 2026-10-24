@@ -272,13 +272,13 @@ func (s *Store) UpsertInventory(ctx context.Context, inv domain.Inventory) error
 	return tx.Commit()
 }
 
-const containerSelect = `SELECT id,agent_id,docker_id,name,image,tag,current_digest,remote_digest,update_available,detection_method,runtime_status,management_kind,compose_project,compose_service,compose_working_dir,labels_json,ignored,protected,sensitive,manageable,safety_reason,last_sync FROM containers`
+const containerSelect = `SELECT id,agent_id,docker_id,name,image,tag,current_digest,remote_digest,update_available,detection_method,runtime_status,management_kind,compose_project,compose_service,compose_working_dir,labels_json,ignored,protected,sensitive,manageable,safety_reason,last_sync,sensitive_updates_allowed FROM containers`
 
 func scanContainer(scanner interface{ Scan(...any) error }) (domain.Container, error) {
 	var c domain.Container
 	var labels string
 	var sync sql.NullString
-	err := scanner.Scan(&c.ID, &c.AgentID, &c.DockerID, &c.Name, &c.Image, &c.Tag, &c.CurrentDigest, &c.RemoteDigest, &c.UpdateAvailable, &c.DetectionMethod, &c.RuntimeStatus, &c.ManagementKind, &c.ComposeProject, &c.ComposeService, &c.ComposeWorkingDir, &labels, &c.Ignored, &c.Protected, &c.Sensitive, &c.Manageable, &c.SafetyReason, &sync)
+	err := scanner.Scan(&c.ID, &c.AgentID, &c.DockerID, &c.Name, &c.Image, &c.Tag, &c.CurrentDigest, &c.RemoteDigest, &c.UpdateAvailable, &c.DetectionMethod, &c.RuntimeStatus, &c.ManagementKind, &c.ComposeProject, &c.ComposeService, &c.ComposeWorkingDir, &labels, &c.Ignored, &c.Protected, &c.Sensitive, &c.Manageable, &c.SafetyReason, &sync, &c.SensitiveUpdatesAllowed)
 	if err != nil {
 		return c, err
 	}
@@ -313,7 +313,7 @@ func (s *Store) Container(ctx context.Context, id string) (domain.Container, err
 	return scanContainer(s.db.QueryRowContext(ctx, containerSelect+" WHERE id=?", id))
 }
 func (s *Store) SetContainerFlag(ctx context.Context, id, flag string, v bool) error {
-	if flag != "ignored" && flag != "protected" {
+	if flag != "ignored" && flag != "protected" && flag != "sensitive_updates_allowed" {
 		return errors.New("invalid flag")
 	}
 	result, err := s.db.ExecContext(ctx, "UPDATE containers SET "+flag+"=? WHERE id=?", v, id)
