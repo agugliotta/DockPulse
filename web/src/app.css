@@ -153,16 +153,22 @@ nav a.active:before {
   display: inline-block;
   width: 8px;
   height: 8px;
-  background: var(--green);
+  background: #88a0a3;
   border-radius: 50%;
-  box-shadow: 0 0 10px #54ce9190;
   flex: 0 0 auto;
 }
+.connection.online i {
+  background: var(--green);
+  box-shadow: 0 0 10px #54ce9190;
+}
+.connection.unreachable i {
+  background: var(--red);
+}
 .connection small {
-  margin-left: auto;
+  display: block;
+  margin-top: 5px;
   color: #88a0a3;
   font: 700 10px 'JetBrains Mono';
-  text-transform: uppercase;
   letter-spacing: 1px;
 }
 .shell {
@@ -731,44 +737,26 @@ tbody tr:hover {
 }
 .tech-fold {
   border-top: 1px solid #192d30;
-  margin-top: 10px;
-  padding-top: 10px;
+  padding: 18px;
 }
 .tech-fold > summary {
   cursor: pointer;
   color: #9db0b3;
   font: 600 12px 'JetBrains Mono';
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
 }
-.tech-grid {
-  margin-top: 12px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+.tech-fold p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 14px 0;
 }
-.tech-grid div {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #091518;
-  padding: 12px;
-  display: grid;
-  gap: 4px;
+.tech-fold .detail-list {
+  padding: 0;
+  margin: 0;
 }
-.tech-grid span {
-  color: #70878c;
-  font: 600 10px 'JetBrains Mono';
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-}
-.tech-grid strong {
-  color: var(--bright);
-  font-size: 14px;
-  overflow-wrap: anywhere;
-}
-.tech-grid small {
-  color: #607a80;
+.tech-fold code {
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 .readiness-board {
   padding: 16px;
@@ -1073,9 +1061,6 @@ pre {
   }
   .activity-feed {
     padding: 6px 14px 0;
-  }
-  .tech-grid {
-    grid-template-columns: 1fr;
   }
   .menu {
     width: 100%;

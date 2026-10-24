@@ -18,6 +18,19 @@ import (
 	"github.com/dockpulse/dockpulse/internal/store"
 )
 
+func TestHealthReportsRunningVersion(t *testing.T) {
+	s := New(nil, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)), Config{Version: "0.3.5"})
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+	var health map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &health); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusOK || health["version"] != "0.3.5" || health["status"] != "ok" {
+		t.Fatalf("unexpected health response: %d %v", w.Code, health)
+	}
+}
+
 func TestStackUpdateChecksEveryMember(t *testing.T) {
 	for _, policy := range []string{"ignored", "protected", "sensitive", "unmanageable"} {
 		t.Run(policy, func(t *testing.T) {

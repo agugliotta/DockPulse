@@ -24,15 +24,18 @@ import (
 )
 
 type Server struct {
-	store     *store.Store
-	bootstrap string
-	client    *http.Client
-	log       *slog.Logger
-	webDir    string
-	cfg       Config
-	subsMu    sync.Mutex
-	subs      map[string]map[chan domain.Event]struct{}
-	replay    *auth.ReplayGuard
+	store          *store.Store
+	bootstrap      string
+	client         *http.Client
+	log            *slog.Logger
+	webDir         string
+	cfg            Config
+	releaseMu      sync.Mutex
+	release        releaseInfo
+	releaseExpires time.Time
+	subsMu         sync.Mutex
+	subs           map[string]map[chan domain.Event]struct{}
+	replay         *auth.ReplayGuard
 }
 
 type Config struct {
@@ -73,6 +76,8 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/containers/{id}/unignore", s.flag("ignored", false))
 	m.HandleFunc("POST /api/v1/containers/{id}/protect", s.flag("protected", true))
 	m.HandleFunc("POST /api/v1/containers/{id}/unprotect", s.flag("protected", false))
+	m.HandleFunc("POST /api/v1/containers/{id}/allow-sensitive", s.flag("sensitive_updates_allowed", true))
+	m.HandleFunc("POST /api/v1/containers/{id}/block-sensitive", s.flag("sensitive_updates_allowed", false))
 	m.HandleFunc("POST /api/v1/stacks/{agent}/{project}/ignore", s.stackFlag("ignored", true))
 	m.HandleFunc("POST /api/v1/stacks/{agent}/{project}/unignore", s.stackFlag("ignored", false))
 	m.HandleFunc("POST /api/v1/stacks/{agent}/{project}/protect", s.stackFlag("protected", true))
@@ -115,7 +120,7 @@ func decode(body io.Reader, v any) error {
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]string{"status": "ok", "service": "dockpulse-control"})
+	writeJSON(w, 200, map[string]string{"status": "ok", "service": "dockpulse-control", "version": s.cfg.Version})
 }
 
 func (s *Server) system(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +132,7 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"version":        s.cfg.Version,
 		"target_version": s.cfg.TargetVersion,
+		"release":        s.latestRelease(r.Context()),
 		"agents":         agents,
 	})
 }
@@ -326,6 +332,9 @@ func (s *Server) flag(flag string, value bool) http.HandlerFunc {
 			return
 		}
 		c, _ := s.store.Container(r.Context(), r.PathValue("id"))
+		if flag == "sensitive_updates_allowed" {
+			s.log.Info("sensitive_policy_changed", "container_id", c.ID, "allowed", value, "requested_by", user(r))
+		}
 		writeJSON(w, 200, c)
 	}
 }
@@ -399,7 +408,7 @@ func (s *Server) validateStack(ctx context.Context, selected domain.Container) e
 		return err
 	}
 	for _, c := range containers {
-		if c.ComposeProject == selected.ComposeProject && (c.Ignored || c.Protected || !c.Manageable || (c.Sensitive && c.Labels["io.dockpulse.allow-sensitive"] != "true")) {
+		if c.ComposeProject == selected.ComposeProject && (c.Ignored || c.Protected || !c.Manageable || (c.Sensitive && !c.AllowsSensitiveUpdates())) {
 			return fmt.Errorf("stack includes blocked workload %s; review its management policy", c.Name)
 		}
 	}
@@ -482,8 +491,8 @@ func buildPreflight(c domain.Container, a domain.Agent, scope string) domain.Upd
 	} else {
 		add("protected", "Protected policy", "pass", "Target is not protected.")
 	}
-	if c.Sensitive && c.Labels["io.dockpulse.allow-sensitive"] != "true" {
-		addDryRunBlock("sensitive", "Sensitive workload", "Sensitive workload requires io.dockpulse.allow-sensitive=true.")
+	if c.Sensitive && !c.AllowsSensitiveUpdates() {
+		addDryRunBlock("sensitive", "Sensitive workload", "Updates for this data service are blocked. Enable them in Management policy.")
 	} else if c.Sensitive {
 		add("sensitive", "Sensitive workload", "warn", "Sensitive workload is explicitly allowed; confirm application backup and recovery posture.")
 	} else {
@@ -592,7 +601,11 @@ func (s *Server) action(kind string) http.HandlerFunc {
 			problem(w, 409, "agent is read-only")
 			return
 		}
-		if kind == "update" && (c.Ignored || c.Protected || (c.Sensitive && c.Labels["io.dockpulse.allow-sensitive"] != "true")) {
+		if c.Sensitive && !c.AllowsSensitiveUpdates() {
+			problem(w, 409, "sensitive workload updates are blocked; enable them in Management policy")
+			return
+		}
+		if kind == "update" && (c.Ignored || c.Protected) {
 			problem(w, 409, "target is ignored, protected, or sensitive; change its policy before updating")
 			return
 		}
@@ -608,6 +621,26 @@ func (s *Server) action(kind string) http.HandlerFunc {
 			if err := s.validateStack(r.Context(), c); err != nil {
 				problem(w, 409, err.Error())
 				return
+			}
+		}
+		policy := map[string]bool{}
+		if c.SensitiveUpdatesAllowed != nil {
+			key := c.DockerID
+			if c.ManagementKind == "compose" {
+				key = c.ComposeService
+			}
+			policy[key] = c.AllowsSensitiveUpdates()
+		}
+		if in.Scope == "stack" {
+			members, err := s.store.Containers(r.Context(), c.AgentID)
+			if err != nil {
+				problem(w, 500, err.Error())
+				return
+			}
+			for _, member := range members {
+				if member.ComposeProject == c.ComposeProject && member.SensitiveUpdatesAllowed != nil {
+					policy[member.ComposeService] = member.AllowsSensitiveUpdates()
+				}
 			}
 		}
 		target := c.ID
@@ -628,7 +661,7 @@ func (s *Server) action(kind string) http.HandlerFunc {
 			path = "/update"
 		}
 		var out domain.ActionResponse
-		err = s.agentCall(r.Context(), a, "POST", path, domain.ActionRequest{ControlJobID: j.ID, ContainerID: c.DockerID, Scope: in.Scope, Confirm: in.Confirm}, &out)
+		err = s.agentCall(r.Context(), a, "POST", path, domain.ActionRequest{ControlJobID: j.ID, ContainerID: c.DockerID, Scope: in.Scope, Confirm: in.Confirm, SensitivePolicy: policy}, &out)
 		if err != nil {
 			_ = s.store.UpdateJob(r.Context(), j.ID, domain.StatusFailed, "", err.Error())
 			problem(w, 502, err.Error())

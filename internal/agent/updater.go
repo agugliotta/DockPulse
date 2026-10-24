@@ -40,11 +40,11 @@ func (u Updater) DryRun(ctx context.Context, req domain.ActionRequest) (Plan, er
 	if err != nil {
 		return Plan{}, err
 	}
-	if err = validateManaged(in); err != nil {
+	if err = validateManaged(in, req.SensitivePolicy); err != nil {
 		return Plan{}, err
 	}
 	if in.Config.Labels["com.docker.compose.project"] != "" {
-		return u.composePlan(ctx, in, req.Scope)
+		return u.composePlan(ctx, in, req.Scope, req.SensitivePolicy)
 	}
 	return u.runPlan(in)
 }
@@ -57,11 +57,11 @@ func (u Updater) Execute(ctx context.Context, req domain.ActionRequest, logf fun
 	if err != nil {
 		return err
 	}
-	if err = validateManaged(in); err != nil {
+	if err = validateManaged(in, req.SensitivePolicy); err != nil {
 		return err
 	}
 	if in.Config.Labels["com.docker.compose.project"] != "" {
-		plan, err := u.composePlan(ctx, in, req.Scope)
+		plan, err := u.composePlan(ctx, in, req.Scope, req.SensitivePolicy)
 		if err != nil {
 			return err
 		}
@@ -147,14 +147,22 @@ func (u Updater) inspect(ctx context.Context, id string) (inspectContainer, erro
 	return v[0], nil
 }
 
-func validateManaged(in inspectContainer) error {
+func validateManaged(in inspectContainer, policy map[string]bool) error {
 	labels := in.Config.Labels
 	if labels["io.dockpulse.manage"] == "false" {
 		return fmt.Errorf("management disabled by label")
 	}
 	sensitive := isSensitive(in.Name, in.Config.Image, labels)
-	if sensitive && labels["io.dockpulse.allow-sensitive"] != "true" {
-		return fmt.Errorf("sensitive workload requires io.dockpulse.allow-sensitive=true")
+	key := in.ID
+	if labels["com.docker.compose.project"] != "" {
+		key = labels["com.docker.compose.service"]
+	}
+	allowed, overridden := policy[key]
+	if !overridden {
+		allowed = labels["io.dockpulse.allow-sensitive"] == "true"
+	}
+	if sensitive && !allowed {
+		return fmt.Errorf("sensitive workload updates require permission in the manager")
 	}
 	if labels["com.docker.compose.project"] == "" && labels["io.dockpulse.manage"] != "true" {
 		return fmt.Errorf("docker-run container requires io.dockpulse.manage=true")
@@ -162,7 +170,7 @@ func validateManaged(in inspectContainer) error {
 	return nil
 }
 
-func (u Updater) composePlan(ctx context.Context, in inspectContainer, scope string) (Plan, error) {
+func (u Updater) composePlan(ctx context.Context, in inspectContainer, scope string, policy map[string]bool) (Plan, error) {
 	l := in.Config.Labels
 	project, service, dir := l["com.docker.compose.project"], l["com.docker.compose.service"], l["com.docker.compose.project.working_dir"]
 	if project == "" || service == "" || dir == "" {
@@ -208,7 +216,8 @@ func (u Updater) composePlan(ctx context.Context, in inspectContainer, scope str
 			member.Config.Labels = map[string]string{}
 		}
 		member.Config.Labels["com.docker.compose.project"] = project
-		if err := validateManaged(member); err != nil {
+		member.Config.Labels["com.docker.compose.service"] = name
+		if err := validateManaged(member, policy); err != nil {
 			return Plan{}, fmt.Errorf("Compose service %s: %w", name, err)
 		}
 		services = append(services, name)

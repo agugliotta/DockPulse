@@ -34,7 +34,7 @@ La freshness usa el reloj del control plane, no el timestamp informado por el ag
 | `update available` | digest local y remoto conocidos, y diferentes                        |
 | `ignored`          | excluido operativamente; no se actualiza                             |
 | `protected`        | bloqueo explícito para evitar mutaciones accidentales                |
-| `sensitive`        | base de datos, cache o label explícita; requiere opt-in adicional    |
+| `sensitive`        | servicio con datos; requiere autorización desde Management policy o label explícita |
 | `manageable=false` | el agente no puede reconstruir/administrar el objetivo con seguridad |
 
 `ignored` y `protected` bloquean updates; se mantienen separados para expresar intención operativa. Un error de registry puede aparecer en `safety_reason` sin volver no administrable al contenedor: significa que la evaluación de update quedó incompleta.
@@ -66,13 +66,19 @@ El agente consulta `Docker-Content-Digest` del manifest asociado a la referencia
 
 ## Versiones y self-update
 
+El pie de la barra lateral consulta `/api/v1/health` al abrir la aplicación y cada 30 segundos. Muestra la versión del binario de control y el estado de conexión observado; si la consulta falla o tarda más de 5 segundos, indica `Control unreachable`. El enlace abre **System**.
+
 La vista **System** muestra:
 
 - versión actual del control plane, tomada del binario en ejecución;
 - versión actual de cada Agent, reportada por heartbeat;
 - target configurado en `DOCKPULSE_UPDATE_VERSION`.
+- último release estable publicado en GitHub, con enlace a sus notas y fecha de verificación;
+- estado por componente: actualización disponible, al día, versión posterior al estable o sin verificar.
 
-Si `DOCKPULSE_VERSION=latest`, Docker resuelve el digest exacto durante `docker compose pull`; DockPulse muestra el tag objetivo, no predice el digest antes del pull.
+La consulta de releases tiene un timeout de 5 segundos y cache de 5 minutos (30 segundos ante errores). Si GitHub no responde, la pantalla conserva las versiones instaladas y muestra el estado como no verificado, sin afirmar que estén al día. Esto consulta releases publicados, no verifica la disponibilidad ni el digest de las imágenes en el registry.
+
+Si `DOCKPULSE_UPDATE_VERSION=latest`, el botón de actualización usa el número del último release verificado. Sin esa verificación, el botón queda deshabilitado. Un target fijo se respeta aunque haya un release posterior; no se ofrece reinstalar la misma versión ni bajar de versión. Versiones de desarrollo o prerelease se muestran sin afirmar que estén al día. Docker resuelve el digest durante el pull.
 
 El self-update de Agents es opt-in. Requiere:
 
@@ -102,7 +108,7 @@ Opt-in básico:
 --label io.dockpulse.manage=true
 ```
 
-Para un workload sensible:
+Para un workload sensible se puede habilitar el permiso desde **Management policy** en el manager. Como alternativa de configuración local:
 
 ```bash
 --label io.dockpulse.manage=true \
@@ -121,6 +127,16 @@ Las labels de un contenedor existente no se cambian en caliente de forma fiable;
 ### Ignore y protect
 
 Desde la UI se pueden aplicar por contenedor. En Compose, ignore/protect de stack actualiza todos los contenedores conocidos del mismo `agent_id + compose_project`. Una sincronización posterior conserva esas políticas aunque Docker recree el contenedor con otro ID.
+
+### Autorizar servicios con datos desde el manager
+
+En **Inventory → servicio → Management policy**, el control **Updates for this data service** permite habilitar y bloquear updates sin editar Compose ni archivos de los agentes. El permiso se guarda en la base del manager, sobrevive a reinicios y a recreaciones que conservan el nombre del contenedor en el mismo agente. Habilitarlo no inicia una actualización.
+
+Sin una decisión desde la UI se respeta `io.dockpulse.allow-sensitive=true`. Una decisión del manager tiene prioridad: **Blocked** bloquea incluso si existe ese label. `Sensitive` sigue indicando que el servicio maneja datos; el inventario distingue **Updates allowed** y **Updates blocked**. Antes de actualizar, revisar backups y compatibilidad.
+
+El manager envía la política dentro de cada solicitud firmada, limitada al contenedor o a los servicios del proyecto seleccionado. El agente la revalida al ejecutar y al revisar la configuración Compose actual. Un permiso no habilita otros servicios del stack, ni supera read-only, ignore, protect, `io.dockpulse.manage=false` o un contrato no administrable.
+
+Este control requiere actualizar tanto el manager como los agentes y refrescar el inventario. Agentes anteriores no interpretan la política central y pueden seguir rechazando el update. La migración agrega una columna nullable; no cambia decisiones previas. Al volver a una versión anterior, los permisos del manager dejan de aplicarse: esa versión respeta solamente el label local. Revisar esos labels antes del rollback, especialmente si el manager bloqueaba un servicio cuyo label permitía actualizaciones. El esquema adicional no elimina datos y es compatible con las consultas anteriores.
 
 ## Qué hace un update
 
@@ -244,6 +260,7 @@ Endpoints principales:
 | `POST /containers/:id/dry-run`                                      | plan validado                                                    |
 | `POST /containers/:id/update`                                       | update con confirmación                                          |
 | `POST /containers/:id/ignore\|unignore\|protect\|unprotect`         | política individual                                              |
+| `POST /containers/:id/allow-sensitive\|block-sensitive`            | permitir o bloquear updates de un servicio con datos desde el manager |
 | `POST /stacks/:agent/:project/ignore\|unignore\|protect\|unprotect` | política de stack                                                |
 | `GET /jobs`, `GET /jobs/:id`                                        | historial/detalle                                                |
 | `GET /jobs/:id/logs`                                                | eventos persistidos JSON                                         |
@@ -303,7 +320,7 @@ Revisar y redactar labels, URLs internas e IDs antes de compartir la salida.
 | `permission denied` en socket        | usuario fuera del grupo/GID Docker                                             | Revisar `ls -l /var/run/docker.sock` y `docker ps` como usuario del agente                    |
 | Compose no administrable             | working dir ausente, fuera de allow-list o path distinto dentro del contenedor | Inspeccionar labels y montar la misma ruta absoluta read-only                                 |
 | Error de digest/401 de registry      | registry privado o rate limit                                                  | El MVP solo soporta acceso anónimo; el estado de update queda desconocido                     |
-| Update rechazado como sensible       | falta opt-in                                                                   | Agregar `io.dockpulse.allow-sensitive=true` al recrear el workload, si el riesgo fue aceptado |
+| Update rechazado como sensible       | falta autorización                                                             | Habilitar updates en **Management policy** del servicio y refrescar el inventario con agentes actualizados |
 | Update rechazado por policy          | ignored/protected/read-only                                                    | Cambiar una sola guarda de forma explícita y volver a dry-run                                 |
 | Job queda running                    | evento terminal no entregado                                                   | Verificar Docker y logs del Agent; respaldar antes de reconciliar offline                     |
 | La app falla aunque el job succeeded | DockPulse solo verificó estado running                                         | Revisar logs/health de aplicación y hacer rollback operativo                                  |

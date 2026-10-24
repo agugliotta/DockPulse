@@ -22,28 +22,36 @@ type Agent struct {
 }
 
 type Container struct {
-	ID                string            `json:"id"`
-	AgentID           string            `json:"agent_id"`
-	DockerID          string            `json:"docker_id"`
-	Name              string            `json:"name"`
-	Image             string            `json:"image"`
-	Tag               string            `json:"tag"`
-	CurrentDigest     string            `json:"current_digest,omitempty"`
-	RemoteDigest      string            `json:"remote_digest,omitempty"`
-	UpdateAvailable   bool              `json:"update_available"`
-	DetectionMethod   string            `json:"detection_method,omitempty"`
-	RuntimeStatus     string            `json:"runtime_status"`
-	ManagementKind    string            `json:"management_kind"`
-	ComposeProject    string            `json:"compose_project,omitempty"`
-	ComposeService    string            `json:"compose_service,omitempty"`
-	ComposeWorkingDir string            `json:"compose_working_dir,omitempty"`
-	Labels            map[string]string `json:"labels"`
-	Ignored           bool              `json:"ignored"`
-	Protected         bool              `json:"protected"`
-	Sensitive         bool              `json:"sensitive"`
-	Manageable        bool              `json:"manageable"`
-	SafetyReason      string            `json:"safety_reason,omitempty"`
-	LastSync          time.Time         `json:"last_sync"`
+	ID                      string            `json:"id"`
+	AgentID                 string            `json:"agent_id"`
+	DockerID                string            `json:"docker_id"`
+	Name                    string            `json:"name"`
+	Image                   string            `json:"image"`
+	Tag                     string            `json:"tag"`
+	CurrentDigest           string            `json:"current_digest,omitempty"`
+	RemoteDigest            string            `json:"remote_digest,omitempty"`
+	UpdateAvailable         bool              `json:"update_available"`
+	DetectionMethod         string            `json:"detection_method,omitempty"`
+	RuntimeStatus           string            `json:"runtime_status"`
+	ManagementKind          string            `json:"management_kind"`
+	ComposeProject          string            `json:"compose_project,omitempty"`
+	ComposeService          string            `json:"compose_service,omitempty"`
+	ComposeWorkingDir       string            `json:"compose_working_dir,omitempty"`
+	Labels                  map[string]string `json:"labels"`
+	Ignored                 bool              `json:"ignored"`
+	Protected               bool              `json:"protected"`
+	Sensitive               bool              `json:"sensitive"`
+	SensitiveUpdatesAllowed *bool             `json:"sensitive_updates_allowed"`
+	Manageable              bool              `json:"manageable"`
+	SafetyReason            string            `json:"safety_reason,omitempty"`
+	LastSync                time.Time         `json:"last_sync"`
+}
+
+func (c Container) AllowsSensitiveUpdates() bool {
+	if c.SensitiveUpdatesAllowed != nil {
+		return *c.SensitiveUpdatesAllowed
+	}
+	return c.Labels["io.dockpulse.allow-sensitive"] == "true"
 }
 
 type PreflightCheck struct {
@@ -94,10 +102,11 @@ type Event struct {
 }
 
 type ActionRequest struct {
-	ControlJobID string `json:"control_job_id"`
-	ContainerID  string `json:"container_id"`
-	Scope        string `json:"scope"` // container, service, stack
-	Confirm      bool   `json:"confirm"`
+	SensitivePolicy map[string]bool `json:"sensitive_policy,omitempty"`
+	ControlJobID    string          `json:"control_job_id"`
+	ContainerID     string          `json:"container_id"`
+	Scope           string          `json:"scope"` // container, service, stack
+	Confirm         bool            `json:"confirm"`
 }
 
 type ActionResponse struct {

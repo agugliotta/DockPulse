@@ -212,10 +212,6 @@ func toContainer(agentID string, in inspectContainer, allowedComposeRoots []stri
 		manageable = false
 		reason = "disabled by io.dockpulse.manage=false"
 	}
-	if sensitive && labels["io.dockpulse.allow-sensitive"] != "true" {
-		manageable = false
-		reason = appendReason(reason, "sensitive workload requires io.dockpulse.allow-sensitive=true")
-	}
 	return domain.Container{ID: agentID + ":" + in.ID, DockerID: in.ID, AgentID: agentID, Name: strings.TrimPrefix(in.Name, "/"), Image: in.Config.Image, Tag: tag, RuntimeStatus: in.State.Status, ManagementKind: kind, ComposeProject: project, ComposeService: service, ComposeWorkingDir: workdir, Labels: labels, Sensitive: sensitive, Manageable: manageable, SafetyReason: reason, LastSync: time.Now().UTC()}
 }
 
