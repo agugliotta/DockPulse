@@ -2,9 +2,9 @@
 
 DockPulse centraliza el inventario y las actualizaciones de contenedores Docker distribuidos entre hosts o LXCs de Proxmox. El control plane guarda estado, políticas, jobs y auditoría; cada `dockpulse-agent` solo accede al Docker daemon de su host local.
 
-**Versión estable:** [v0.3.5](https://github.com/agugliotta/DockPulse/releases/tag/v0.3.5). Incluye correcciones de aislamiento entre agentes, actualizaciones Docker y Compose más seguras, mejoras de inventario y estado de jobs, y ajustes de interfaz. Consultar las [notas del release](https://github.com/agugliotta/DockPulse/releases/tag/v0.3.5) para el detalle.
+**Versión estable:** [v0.3.6](https://github.com/agugliotta/DockPulse/releases/tag/v0.3.6). Incluye estados de versión y conexión verificados, autorización de servicios sensibles desde el manager y detalles de imágenes más claros. Consultar las [notas del release](https://github.com/agugliotta/DockPulse/releases/tag/v0.3.6) para el detalle.
 
-**Cambios posteriores a v0.3.5:** el código de `main` incorpora las mejoras de interfaz y permisos descritas abajo. Para usarlas en una instalación existente se necesita una imagen que incluya estos cambios; actualizar el manager y los agentes, y refrescar el inventario. Mergear código no publica imágenes: el workflow de publicación se ejecuta al crear un tag de release.
+Para usar los permisos centrales, actualizar tanto el manager como los agentes y refrescar el inventario. Las imágenes se publican al crear el tag del release.
 
 > **Estado del MVP:** actualizaciones manuales con confirmación. El scheduler permanece deshabilitado hasta disponer de ventanas de mantenimiento y healthchecks de aplicación. La UI/API no implementa login propio: debe quedar en una red confiable o detrás de un reverse proxy autenticado.
 
@@ -59,19 +59,19 @@ Las imágenes publicadas son para `linux/amd64`. La descarga requiere autenticac
 
 Las imágenes se publican al crear tags `vX.Y.Z`. También se publica `latest` para instalaciones que prefieren seguir el release más reciente:
 
-- `DOCKPULSE_VERSION=0.3.5` fija explícitamente la versión desplegada y facilita volver a una imagen anterior.
+- `DOCKPULSE_VERSION=0.3.6` fija explícitamente la versión desplegada y facilita volver a una imagen anterior.
 - `DOCKPULSE_VERSION=latest` hace que `docker compose pull` resuelva el release más nuevo publicado.
 - `DOCKPULSE_UPDATE_VERSION` indica en la UI/API a qué tag se intentará actualizar; por defecto se recomienda `latest`.
 
 La página **System** distingue la versión instalada del control plane, la versión reportada por cada agente, el último release estable publicado en GitHub y el destino configurado. Muestra **Update available**, **Up to date** o **Version unverified**, con enlace a las notas del release. Si falla la consulta, no afirma que la instalación esté al día.
 
-Con `DOCKPULSE_UPDATE_VERSION=latest`, el botón muestra el número concreto verificado, por ejemplo **Update to 0.3.5**. Un destino fijo se respeta aunque exista un release posterior; no se ofrece reinstalar la misma versión ni bajar a una anterior. La consulta tiene cache de 5 minutos y verifica releases publicados, no la disponibilidad de imágenes en GHCR.
+Con `DOCKPULSE_UPDATE_VERSION=latest`, el botón muestra el número concreto verificado, por ejemplo **Update to 0.3.6**. Un destino fijo se respeta aunque exista un release posterior; no se ofrece reinstalar la misma versión ni bajar a una anterior. La consulta tiene cache de 5 minutos y verifica releases publicados, no la disponibilidad de imágenes en GHCR.
 
 El pie de la barra lateral muestra la versión real del binario de control, sin un número fijo. Comprueba su conexión al abrir la aplicación y cada 30 segundos; si falla, indica **Control unreachable**. El indicador abre **System**. Actualizar agentes no actualiza automáticamente el servidor: el control requiere su propio despliegue o un agente local configurado para su servicio.
 
-## Actualizar a v0.3.5
+## Actualizar a v0.3.6
 
-Para instalaciones existentes, respaldar SQLite y conservar `DOCKPULSE_ENCRYPTION_KEY`. En cada host, configurar `DOCKPULSE_VERSION=0.3.5` en el archivo de entorno correspondiente; los archivos `.env.example` pueden apuntar a una versión anterior.
+Para instalaciones existentes, respaldar SQLite y conservar `DOCKPULSE_ENCRYPTION_KEY`. En cada host, configurar `DOCKPULSE_VERSION=0.3.6` en el archivo de entorno correspondiente.
 
 En el LXC Server, desde la carpeta de DockPulse:
 
@@ -87,7 +87,7 @@ docker compose --env-file deploy/agent.env -f deploy/docker-compose.agent.yml pu
 docker compose --env-file deploy/agent.env -f deploy/docker-compose.agent.yml up -d
 ```
 
-Verificar en **System** que Server y Agents reporten `0.3.5`, y comprobar heartbeat e inventario antes de actualizar workloads. Para self-update y recuperación, consultar la [guía de operación](docs/operations.md#versiones-y-self-update).
+Verificar en **System** que Server y Agents reporten `0.3.6`, y comprobar heartbeat e inventario antes de actualizar workloads. Para self-update y recuperación, consultar la [guía de operación](docs/operations.md#versiones-y-self-update).
 
 ## Política de administración
 
