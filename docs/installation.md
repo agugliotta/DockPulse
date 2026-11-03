@@ -111,7 +111,7 @@ DOCKPULSE_CONTROL_PORT=8080
 Responsabilidad de cada secreto:
 
 - `DOCKPULSE_ENCRYPTION_KEY` cifra en SQLite los secrets de Agents. Guardar una copia segura fuera del LXC.
-- `DOCKPULSE_BOOTSTRAP_TOKEN` permite registrar Agents. Los Agents deben usar el mismo valor.
+- `DOCKPULSE_BOOTSTRAP_TOKEN` permite crear Agents. Los Agents deben usar el mismo valor; re-registrar una identidad existente exige además conservar su secret individual. Bootstrap no permite reemplazar ese secret.
 - `DOCKPULSE_VERSION` puede quedar fijado a `0.3.0` o apuntar a `latest`.
 - `DOCKPULSE_UPDATE_VERSION` es el target que muestra **System** para operaciones de actualización.
 

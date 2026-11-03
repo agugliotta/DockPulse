@@ -19,7 +19,8 @@ func NewRegistryClient() *RegistryClient {
 }
 
 func parseReference(ref string) (repo, tag, registry string) {
-	ref = strings.SplitN(ref, "@", 2)[0]
+	parts := strings.SplitN(ref, "@", 2)
+	ref = parts[0]
 	first := ""
 	if i := strings.Index(ref, "/"); i >= 0 {
 		first = ref[:i]
@@ -40,6 +41,9 @@ func parseReference(ref string) (repo, tag, registry string) {
 	if colon > slash {
 		tag = repo[colon+1:]
 		repo = repo[:colon]
+	}
+	if len(parts) == 2 {
+		tag = parts[1]
 	}
 	return
 }

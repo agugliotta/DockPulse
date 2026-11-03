@@ -15,7 +15,7 @@ Para usar los permisos centrales, actualizar tanto el manager como los agentes y
 - Comparación de digests con Docker Hub y Registry v2 anónimo.
 - Dry-run y actualización por contenedor, servicio Compose o stack.
 - Preflight por workload con checks de agent, scope, políticas, contrato y digest.
-- Recreación conservadora de `docker run`, rollback ante fallos y preservación de mounts soportados, memoria compartida y configuración de logging.
+- Recreación conservadora de `docker run`, intento de rollback mientras el agente sigue activo y preservación de mounts soportados, memoria compartida y configuración de logging.
 - Opt-in, ignore/protect, clasificación sensible y modo read-only.
 - Permitir o bloquear actualizaciones de servicios con datos desde el manager, sin editar los archivos de los agentes.
 - Versión instalada y último release estable separados, estado de actualización por componente y conexión del control verificada.
@@ -177,4 +177,5 @@ docs/                   instalación, operación y arquitectura
 - Sin credenciales para registries privados.
 - Sin rollback Compose automático ni validación de salud de aplicación.
 - Sin scheduler activo, canary, HA o modo pull-only para agentes.
+- Re-registrar una identidad existente requiere su secret actual; no hay rotación online de agent secrets.
 - El bootstrap token debe rotarse de forma coordinada en control y agentes; los agentes lo necesitan para volver a registrarse después de perder conectividad.

@@ -393,23 +393,23 @@ func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pf := buildPreflight(c, a, scope)
-	if scope == "stack" {
-		if err := s.validateStack(r.Context(), c); err != nil {
+	if c.ManagementKind == "compose" {
+		if err := s.validateComposePolicy(r.Context(), c, scope); err != nil {
 			pf.CanUpdate = false
-			pf.Checks = append(pf.Checks, domain.PreflightCheck{Key: "stack_policy", Label: "Stack policies", Status: "block", Message: err.Error()})
+			pf.Checks = append(pf.Checks, domain.PreflightCheck{Key: "compose_policy", Label: "Compose scope policies", Status: "block", Message: err.Error()})
 		}
 	}
 	writeJSON(w, 200, pf)
 }
 
-func (s *Server) validateStack(ctx context.Context, selected domain.Container) error {
+func (s *Server) validateComposePolicy(ctx context.Context, selected domain.Container, scope string) error {
 	containers, err := s.store.Containers(ctx, selected.AgentID)
 	if err != nil {
 		return err
 	}
 	for _, c := range containers {
-		if c.ComposeProject == selected.ComposeProject && (c.Ignored || c.Protected || !c.Manageable || (c.Sensitive && !c.AllowsSensitiveUpdates())) {
-			return fmt.Errorf("stack includes blocked workload %s; review its management policy", c.Name)
+		if c.ComposeProject == selected.ComposeProject && (scope == "stack" || c.ComposeService == selected.ComposeService) && (c.Ignored || c.Protected || !c.Manageable || (c.Sensitive && !c.AllowsSensitiveUpdates())) {
+			return fmt.Errorf("scope includes blocked workload %s; review its management policy", c.Name)
 		}
 	}
 	return nil
@@ -556,7 +556,7 @@ func (s *Server) selfUpdate(w http.ResponseWriter, r *http.Request) {
 	var out domain.ActionResponse
 	err = s.agentCall(r.Context(), a, "POST", "/self-update", domain.SelfUpdateRequest{ControlJobID: j.ID, TargetVersion: in.TargetVersion, Confirm: in.Confirm}, &out)
 	if err != nil {
-		_ = s.store.UpdateJob(r.Context(), j.ID, domain.StatusFailed, "", err.Error())
+		s.dispatchFailed(j.ID, err)
 		problem(w, 502, err.Error())
 		return
 	}
@@ -617,8 +617,8 @@ func (s *Server) action(kind string) http.HandlerFunc {
 			problem(w, 409, "agent is offline")
 			return
 		}
-		if kind == "update" && in.Scope == "stack" {
-			if err := s.validateStack(r.Context(), c); err != nil {
+		if kind == "update" && c.ManagementKind == "compose" {
+			if err := s.validateComposePolicy(r.Context(), c, in.Scope); err != nil {
 				problem(w, 409, err.Error())
 				return
 			}
@@ -663,7 +663,7 @@ func (s *Server) action(kind string) http.HandlerFunc {
 		var out domain.ActionResponse
 		err = s.agentCall(r.Context(), a, "POST", path, domain.ActionRequest{ControlJobID: j.ID, ContainerID: c.DockerID, Scope: in.Scope, Confirm: in.Confirm, SensitivePolicy: policy}, &out)
 		if err != nil {
-			_ = s.store.UpdateJob(r.Context(), j.ID, domain.StatusFailed, "", err.Error())
+			s.dispatchFailed(j.ID, err)
 			problem(w, 502, err.Error())
 			return
 		}
@@ -677,6 +677,41 @@ func (s *Server) action(kind string) http.HandlerFunc {
 		j, _ = s.store.Job(r.Context(), j.ID)
 		writeJSON(w, 202, j)
 	}
+}
+
+type agentRejection struct {
+	status  int
+	message string
+}
+
+func (e *agentRejection) Error() string {
+	return fmt.Sprintf("agent rejected request (%d): %s", e.status, e.message)
+}
+
+func (s *Server) dispatchFailed(id string, cause error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	job, err := s.store.Job(ctx, id)
+	if err != nil {
+		s.log.Error("dispatch_job_lookup_failed", "job_id", id, "error", err)
+		return
+	}
+	if job.Status == domain.StatusSucceeded || job.Status == domain.StatusFailed {
+		return
+	}
+	var rejection *agentRejection
+	if job.Action == "dry-run" || (errors.As(cause, &rejection) && rejection.status >= 400 && rejection.status < 500) {
+		if err := s.store.UpdateJob(ctx, id, domain.StatusFailed, "", cause.Error()); err != nil {
+			s.log.Error("dispatch_status_failed", "job_id", id, "error", err)
+		}
+		return
+	}
+	// A lost or malformed acceptance response does not prove that Docker stayed unchanged.
+	message := "Dispatch acceptance is unknown; execution lock retained. Verify agent and Docker state before reconciliation: " + cause.Error()
+	if _, err := s.store.AddEvent(ctx, domain.Event{JobID: id, Level: "warn", Message: message, CreatedAt: time.Now()}); err != nil {
+		s.log.Error("dispatch_audit_failed", "job_id", id, "error", err)
+	}
+	s.log.Warn("dispatch_unknown", "job_id", id, "error", cause)
 }
 
 func user(r *http.Request) string {
@@ -713,10 +748,15 @@ func (s *Server) agentCall(ctx context.Context, a domain.Agent, method, path str
 	defer res.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(res.Body, auth.MaxBodyBytes))
 	if res.StatusCode >= 300 {
-		return fmt.Errorf("agent rejected request (%d): %s", res.StatusCode, strings.TrimSpace(string(b)))
+		return &agentRejection{res.StatusCode, strings.TrimSpace(string(b))}
 	}
 	if output != nil {
-		return json.Unmarshal(b, output)
+		if err := json.Unmarshal(b, output); err != nil {
+			return err
+		}
+		if response, ok := output.(*domain.ActionResponse); ok && response.JobID == "" {
+			return fmt.Errorf("agent response omitted job_id")
+		}
 	}
 	return nil
 }

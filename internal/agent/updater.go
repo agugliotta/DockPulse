@@ -68,7 +68,7 @@ func (u Updater) Execute(ctx context.Context, req domain.ActionRequest, logf fun
 		for _, step := range plan.Steps {
 			logf("info", step)
 		}
-		return u.executeCompose(ctx, in, req.Scope)
+		return u.executeCompose(ctx, in, req.Scope, req.SensitivePolicy)
 	}
 	plan, err := u.runPlan(in)
 	if err != nil {
@@ -222,6 +222,9 @@ func (u Updater) composePlan(ctx context.Context, in inspectContainer, scope str
 		}
 		services = append(services, name)
 	}
+	if err := u.validateComposeContract(ctx, in, services); err != nil {
+		return Plan{}, err
+	}
 	sort.Strings(services)
 	if len(services) == 0 {
 		return Plan{}, fmt.Errorf("Compose configuration contains no services in the requested scope")
@@ -237,6 +240,49 @@ func (u Updater) composePlan(ctx context.Context, in inspectContainer, scope str
 	}
 	return Plan{Target: target, Scope: scope, Steps: []string{"Update scope: " + scope + " " + target, "Services that may be recreated: " + strings.Join(services, ", "), "Download the newest image for the selected service(s) without changing anything yet", "Run Docker Compose from " + dir + " to recreate the selected service(s)", "After the update, refresh inventory and compare the new local digest against the registry digest"}, Warnings: []string{"Compose keeps volumes and bind mounts, but DockPulse does not verify application-level health after the container starts", "Equivalent commands: docker compose pull" + suffix + " && docker compose up -d" + upSuffix}}, nil
 }
+
+// Compose's deployed hash catches lost interpolation inputs and other config drift.
+func (u Updater) validateComposeContract(ctx context.Context, in inspectContainer, services []string) error {
+	deployed := map[string]string{in.Config.Labels["com.docker.compose.service"]: in.Config.Labels["com.docker.compose.config-hash"]}
+	if len(services) > 1 {
+		ids, err := u.Docker.Run(ctx, "ps", "-aq", "--filter", "label=com.docker.compose.project="+in.Config.Labels["com.docker.compose.project"])
+		if err != nil {
+			return fmt.Errorf("read deployed Compose services: %w", err)
+		}
+		if len(strings.Fields(string(ids))) > 0 {
+			raw, err := u.Docker.Run(ctx, append([]string{"inspect"}, strings.Fields(string(ids))...)...)
+			if err != nil {
+				return err
+			}
+			var members []inspectContainer
+			if err := json.Unmarshal(raw, &members); err != nil {
+				return err
+			}
+			for _, member := range members {
+				name, hash := member.Config.Labels["com.docker.compose.service"], member.Config.Labels["com.docker.compose.config-hash"]
+				if previous, exists := deployed[name]; exists && previous != hash {
+					return fmt.Errorf("Compose replicas have different deployed configurations for %s", name)
+				}
+				deployed[name] = hash
+			}
+		}
+	}
+	for _, service := range services {
+		if deployed[service] == "" {
+			return fmt.Errorf("deployed Compose config hash unavailable for %s; cannot verify interpolation context", service)
+		}
+		raw, err := u.Docker.Run(ctx, append(composeArgs(in), "--profile", "*", "config", "--hash", service)...)
+		if err != nil {
+			return fmt.Errorf("verify Compose configuration: %w", err)
+		}
+		fields := strings.Fields(string(raw))
+		if len(fields) != 2 || fields[0] != service || fields[1] != deployed[service] {
+			return fmt.Errorf("Compose configuration differs from deployed service %s; restore its original environment and config before updating", service)
+		}
+	}
+	return nil
+}
+
 func (u Updater) validateDir(dir string) error {
 	return validateComposeDir(dir, u.AllowedComposeRoots)
 }
@@ -248,9 +294,14 @@ func composeArgs(in inspectContainer) []string {
 			args = append(args, "-f", file)
 		}
 	}
+	for _, file := range strings.Split(l["com.docker.compose.project.environment_file"], ",") {
+		if file != "" {
+			args = append(args, "--env-file", file)
+		}
+	}
 	return args
 }
-func (u Updater) executeCompose(ctx context.Context, in inspectContainer, scope string) error {
+func (u Updater) executeCompose(ctx context.Context, in inspectContainer, scope string, policy map[string]bool) error {
 	l := in.Config.Labels
 	service := l["com.docker.compose.service"]
 	base := composeArgs(in)
@@ -261,6 +312,10 @@ func (u Updater) executeCompose(ctx context.Context, in inspectContainer, scope 
 		up = append(up, "--no-deps", service)
 	}
 	if _, err := u.Docker.Run(ctx, pull...); err != nil {
+		return err
+	}
+	// Pull can take minutes; do not apply configuration edited while it was running.
+	if _, err := u.composePlan(ctx, in, scope, policy); err != nil {
 		return err
 	}
 	_, err := u.Docker.Run(ctx, up...)
