@@ -258,6 +258,7 @@ func (a *Agent) execute(id string, req domain.ActionRequest) {
 	a.jobs[id].Job.Error = errText
 	a.jobs[id].Job.FinishedAt = &finished
 	a.mu.Unlock()
+	a.releaseMutation(id)
 	a.emit(req.ControlJobID, id, "", "", status, "", errText)
 	refreshCtx, refreshCancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer refreshCancel()
@@ -295,6 +296,7 @@ func (a *Agent) executeSelfUpdate(id string, req domain.SelfUpdateRequest) {
 	a.jobs[id].Job.Error = errText
 	a.jobs[id].Job.FinishedAt = &finished
 	a.mu.Unlock()
+	a.releaseMutation(id)
 	a.emit(req.ControlJobID, id, "", "", status, "", errText)
 }
 func (a *Agent) emit(controlID, localID, level, msg, status, plan, errText string) {

@@ -66,10 +66,20 @@ func TestComposeStackValidatesEveryService(t *testing.T) {
 }
 
 func TestServiceUpdateDoesNotRecreateDependencies(t *testing.T) {
+	dir := t.TempDir()
 	in := inspectContainer{}
-	in.Config.Labels = map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "web", "com.docker.compose.project.working_dir": "/app", "com.docker.compose.project.config_files": "/app/base.yml,/app/prod.yml"}
+	in.Config.Labels = map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "web", "com.docker.compose.project.working_dir": dir, "com.docker.compose.project.config_files": "/app/base.yml,/app/prod.yml", "com.docker.compose.config-hash": "deployed"}
 	r := &recordingRunner{}
-	if err := (Updater{Docker: r}).executeCompose(t.Context(), in, "service"); err != nil {
+	runner := runFunc(func(ctx context.Context, args ...string) ([]byte, error) {
+		if strings.Contains(strings.Join(args, " "), "config --format json") {
+			return []byte(`{"services":{"web":{"image":"nginx"}}}`), nil
+		}
+		if strings.Contains(strings.Join(args, " "), "config --hash") {
+			return []byte("web deployed"), nil
+		}
+		return r.Run(ctx, args...)
+	})
+	if err := (Updater{Docker: runner, AllowedComposeRoots: []string{dir}}).executeCompose(t.Context(), in, "service", nil); err != nil {
 		t.Fatal(err)
 	}
 	up := strings.Join(r.args[1], " ")

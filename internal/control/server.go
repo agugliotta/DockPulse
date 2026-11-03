@@ -691,8 +691,16 @@ func (e *agentRejection) Error() string {
 func (s *Server) dispatchFailed(id string, cause error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	job, err := s.store.Job(ctx, id)
+	if err != nil {
+		s.log.Error("dispatch_job_lookup_failed", "job_id", id, "error", err)
+		return
+	}
+	if job.Status == domain.StatusSucceeded || job.Status == domain.StatusFailed {
+		return
+	}
 	var rejection *agentRejection
-	if errors.As(cause, &rejection) && rejection.status >= 400 && rejection.status < 500 {
+	if job.Action == "dry-run" || (errors.As(cause, &rejection) && rejection.status >= 400 && rejection.status < 500) {
 		if err := s.store.UpdateJob(ctx, id, domain.StatusFailed, "", cause.Error()); err != nil {
 			s.log.Error("dispatch_status_failed", "job_id", id, "error", err)
 		}

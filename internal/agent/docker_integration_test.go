@@ -156,4 +156,25 @@ func TestDockerIntegrationProfiledService(t *testing.T) {
 	if err != nil || untouched.ID != sibling.ID || untouched.State.Status != "running" {
 		t.Fatalf("sibling was changed: %s %v", untouched.ID, err)
 	}
+	// Simulate an operator editing the file while the image download completes.
+	upCalled := false
+	u.Docker = runFunc(func(ctx context.Context, args ...string) ([]byte, error) {
+		command := strings.Join(args, " ")
+		if strings.Contains(command, " up ") {
+			upCalled = true
+		}
+		out, err := d.Run(ctx, args...)
+		if err == nil && strings.Contains(command, " pull ") {
+			err = os.WriteFile(file, []byte(fmt.Sprintf(config, "601")), 0600)
+		}
+		return out, err
+	})
+	req.ContainerID = after.ID
+	if err := u.Execute(t.Context(), req, func(string, string) {}); err == nil || !strings.Contains(err.Error(), "differs") || upCalled {
+		t.Fatalf("configuration changed during pull was applied: up=%v error=%v", upCalled, err)
+	}
+	unchanged, err := u.inspect(t.Context(), after.ID)
+	if err != nil || unchanged.State.Status != "running" || !reflect.DeepEqual(unchanged.Config.Cmd, after.Config.Cmd) {
+		t.Fatalf("live service changed after failed revalidation: %+v %v", unchanged.Config.Cmd, err)
+	}
 }

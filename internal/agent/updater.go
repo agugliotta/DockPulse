@@ -68,7 +68,7 @@ func (u Updater) Execute(ctx context.Context, req domain.ActionRequest, logf fun
 		for _, step := range plan.Steps {
 			logf("info", step)
 		}
-		return u.executeCompose(ctx, in, req.Scope)
+		return u.executeCompose(ctx, in, req.Scope, req.SensitivePolicy)
 	}
 	plan, err := u.runPlan(in)
 	if err != nil {
@@ -301,7 +301,7 @@ func composeArgs(in inspectContainer) []string {
 	}
 	return args
 }
-func (u Updater) executeCompose(ctx context.Context, in inspectContainer, scope string) error {
+func (u Updater) executeCompose(ctx context.Context, in inspectContainer, scope string, policy map[string]bool) error {
 	l := in.Config.Labels
 	service := l["com.docker.compose.service"]
 	base := composeArgs(in)
@@ -312,6 +312,10 @@ func (u Updater) executeCompose(ctx context.Context, in inspectContainer, scope 
 		up = append(up, "--no-deps", service)
 	}
 	if _, err := u.Docker.Run(ctx, pull...); err != nil {
+		return err
+	}
+	// Pull can take minutes; do not apply configuration edited while it was running.
+	if _, err := u.composePlan(ctx, in, scope, policy); err != nil {
 		return err
 	}
 	_, err := u.Docker.Run(ctx, up...)

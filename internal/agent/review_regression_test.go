@@ -179,3 +179,104 @@ func TestAgentRejectsOverlappingMutations(t *testing.T) {
 		t.Fatalf("regression: second=%d self=%d", second, self)
 	}
 }
+
+func TestPinnedDigestSelectsExactLocalManifest(t *testing.T) {
+	for _, ref := range []string{"nginx@sha256:pin", "nginx:stable@sha256:pin"} {
+		if got := matchingDigest(ref, []string{"nginx@sha256:other", "nginx@sha256:pin"}); got != "sha256:pin" {
+			t.Fatalf("selected unrelated manifest %q for %s", got, ref)
+		}
+		if got := matchingDigest(ref, []string{"nginx@sha256:other"}); got != "" {
+			t.Fatalf("missing pinned manifest reported as known: %q", got)
+		}
+	}
+}
+
+func TestComposeRejectsConfigurationChangedDuringPull(t *testing.T) {
+	dir := t.TempDir()
+	var in inspectContainer
+	in.ID = "container"
+	in.Config.Image = "nginx"
+	in.Config.Labels = map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "web", "com.docker.compose.project.working_dir": dir, "com.docker.compose.config-hash": "deployed"}
+	raw, _ := json.Marshal([]inspectContainer{in})
+	hash := "deployed"
+	updated := false
+	u := Updater{AllowedComposeRoots: []string{dir}, Docker: runFunc(func(_ context.Context, args ...string) ([]byte, error) {
+		if args[0] == "inspect" {
+			return raw, nil
+		}
+		command := strings.Join(args, " ")
+		if strings.Contains(command, "config --format json") {
+			return []byte(`{"services":{"web":{"image":"nginx"}}}`), nil
+		}
+		if strings.Contains(command, "config --hash") {
+			return []byte("web " + hash), nil
+		}
+		if strings.Contains(command, " pull ") {
+			hash = "changed"
+			return nil, nil
+		}
+		if strings.Contains(command, " up ") {
+			updated = true
+			return nil, nil
+		}
+		t.Fatalf("unexpected Docker command: %s", command)
+		return nil, nil
+	})}
+	err := u.Execute(t.Context(), domain.ActionRequest{ContainerID: in.ID, Scope: "service", Confirm: true}, func(string, string) {})
+	if err == nil || updated {
+		t.Fatalf("changed config reached compose up: error=%v up=%v", err, updated)
+	}
+}
+
+func TestCompletedMutationDoesNotWaitForInventory(t *testing.T) {
+	var in inspectContainer
+	in.ID = "container"
+	in.Name = "/app"
+	in.Config.Image = "alpine:3.22"
+	in.Config.Labels = map[string]string{"io.dockpulse.manage": "true"}
+	raw, _ := json.Marshal([]inspectContainer{in})
+	refreshStarted, releaseRefresh, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	runner := runFunc(func(_ context.Context, args ...string) ([]byte, error) {
+		if args[0] == "ps" {
+			close(refreshStarted)
+			<-releaseRefresh
+			return nil, nil
+		}
+		if args[0] == "inspect" && len(args) == 2 {
+			return raw, nil
+		}
+		if args[0] == "inspect" {
+			return []byte("true"), nil
+		}
+		return nil, nil
+	})
+	a := New(Config{ID: "a", ControlURL: "http://control"}, Discovery{Docker: runner}, Updater{Docker: runner}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.client = &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 202, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("{}"))}, nil
+	})}
+	req := domain.ActionRequest{ControlJobID: "first", ContainerID: in.ID, Confirm: true}
+	id, _, err := a.admitMutation(req.ControlJobID, "update", req, func() error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { a.execute(id, req); close(done) }()
+	t.Cleanup(func() {
+		close(releaseRefresh)
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Error("executor did not finish")
+		}
+	})
+	select {
+	case <-refreshStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("post-update refresh did not start")
+	}
+	req.ControlJobID = "second"
+	next, _, err := a.admitMutation(req.ControlJobID, "update", req, func() error { return nil })
+	if err != nil {
+		t.Fatalf("completed update still blocks mutations during read-only refresh: %v", err)
+	}
+	a.releaseMutation(next)
+}

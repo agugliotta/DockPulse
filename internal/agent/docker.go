@@ -267,6 +267,14 @@ func imageTag(ref string) string {
 	return "latest"
 }
 func matchingDigest(ref string, digests []string) string {
+	if parts := strings.SplitN(ref, "@", 2); len(parts) == 2 {
+		for _, digest := range digests {
+			if normalizeDigest(digest) == parts[1] {
+				return parts[1]
+			}
+		}
+		return ""
+	}
 	repo, _, _ := parseReference(ref)
 	for _, v := range digests {
 		parts := strings.SplitN(v, "@", 2)

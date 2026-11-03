@@ -104,3 +104,38 @@ func TestLostAcknowledgementRetainsLock(t *testing.T) {
 		t.Fatal("uncertain dispatch released its lock")
 	}
 }
+
+func TestDryRunDispatchFailureReleasesUpdateLock(t *testing.T) {
+	s, st := reviewServer(t, []domain.Container{{DockerID: "one", Name: "app", RuntimeStatus: "running", ManagementKind: "docker-run", Manageable: true}})
+	s.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, context.DeadlineExceeded })}
+	res := httptest.NewRecorder()
+	s.Handler().ServeHTTP(res, httptest.NewRequest("POST", "/api/v1/containers/a:one/dry-run", bytes.NewBufferString(`{}`)))
+	jobs, err := st.Jobs(t.Context(), 10)
+	if err != nil || len(jobs) != 1 || jobs[0].Status != domain.StatusFailed {
+		t.Fatalf("failed read-only preview retained its lock: %+v %v", jobs, err)
+	}
+	next := jobs[0]
+	next.ID = "update-after-preview"
+	next.Action = "update"
+	next.Status = domain.StatusQueued
+	if err := st.CreateJob(t.Context(), next); err != nil {
+		t.Fatalf("preview blocked subsequent update: %v", err)
+	}
+}
+
+func TestDispatchFailurePreservesCompletedJob(t *testing.T) {
+	s, st := reviewServer(t, nil)
+	job := domain.Job{ID: "completed", AgentID: "a", TargetKey: "target", Action: "update", Status: domain.StatusSucceeded, CreatedAt: time.Now()}
+	if err := st.CreateJob(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	s.dispatchFailed(job.ID, context.DeadlineExceeded)
+	got, err := st.Job(t.Context(), job.ID)
+	if err != nil || got.Status != domain.StatusSucceeded {
+		t.Fatalf("completion was overwritten: %+v %v", got, err)
+	}
+	events, err := st.Events(t.Context(), job.ID, 0)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("completed job received an uncertain-dispatch warning: %+v %v", events, err)
+	}
+}
