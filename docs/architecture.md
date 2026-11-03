@@ -14,24 +14,26 @@ El control plane no monta ningún Docker socket. Cada agente es una frontera de 
 | ------------- | ---------------------------------------------------- | ------------------------------------ |
 | Discovery     | `docker inspect`, clasificación Compose/run, digests | No ejecuta updates                   |
 | Evaluation    | Registry manifest digest, labels y política sensible | No asume que `latest` es seguro      |
-| Execution     | Plan validado, Compose o recreación transaccional    | No acepta shell/comandos arbitrarios |
+| Execution     | Plan validado, Compose o recreación con intento de rollback    | No acepta shell/comandos arbitrarios |
 | Control plane | Estado global, locks, auditoría, dispatch            | No toca sockets Docker               |
 | Web           | Presentación y confirmaciones                        | No contiene reglas de negocio        |
 
 ## Flujo de actualización
 
 1. La UI solicita un update confirmado o un preview opcional; el control crea un job y firma la solicitud al agente.
-2. El agente vuelve a inspeccionar el objetivo y aplica sus propias guardas. La autorización no depende de datos viejos del control.
-3. Para Compose ejecuta `pull` y `up -d` con proyecto, directorio, archivos de configuración y servicio como argumentos separados. El scope servicio usa `--no-deps`; el scope stack valida todos los servicios. Ambos comparten un lock por proyecto.
-4. Para `docker run`, hace pull, detiene y renombra el original, crea el reemplazo, conecta redes, arranca y verifica. Ante fallo usa un contexto de recuperación independiente, elimina el reemplazo y restaura el original.
-5. Cada evento vuelve firmado, se persiste y se transmite por SSE.
+2. El agente vuelve a inspeccionar el objetivo y valida labels, clasificación sensible, configuración Compose y contrato local. Ignore/protect y los permisos centrales se evalúan al despachar; sus cambios afectan nuevas solicitudes, no revocan una operación ya aceptada. Ver [políticas operativas](operations.md#políticas-y-labels).
+3. Para Compose ejecuta `pull` y `up -d` con proyecto, directorio, archivos de configuración y servicio como argumentos separados. El scope servicio usa `--no-deps`; el scope stack valida todos los servicios. Ambos comparten un lock por proyecto. Para servicio se validan todas sus réplicas. El agente admite una sola mutación a la vez, incluido self-update, y deduplica el mismo job mientras conserva su registro local. Si la aceptación queda incierta, el control retiene el lock hasta verificar el resultado.
+4. Para `docker run`, hace pull, detiene y renombra el original, crea el reemplazo, conecta redes, arranca y verifica. Ante fallo intenta eliminar el reemplazo y restaurar el original con un contexto independiente. Ese rollback depende de que el proceso siga vivo; tras una interrupción requiere [recuperación manual](operations.md#interrupción-durante-la-recreación).
+5. El agente envía eventos firmados; el control persiste los recibidos y los transmite por SSE. La entrega no es durable y puede faltar un evento tras agotar los reintentos.
 
 ## Modelo de amenazas y límites
 
+- La Web/API humana no tiene login ni RBAC propio: requiere una red de gestión confiable o un reverse proxy autenticado. HTTPS no autentica al operador. El proxy debe reemplazar `X-DockPulse-User` con la identidad verificada; ver [TLS y autenticación humana](installation.md#parte-e--tls-y-autenticación-humana).
 - HMAC-SHA256 cubre método, URI, timestamp y body. Una ventana de cinco minutos reduce replay, pero TLS sigue siendo obligatorio fuera de una red aislada.
-- El token bootstrap solo registra agentes. Los secretos por agente se cifran en SQLite con AES-256-GCM usando una clave externa.
+- El token bootstrap permite crear nuevas identidades. Re-registrar una identidad existente exige su secreto actual; bootstrap no permite reemplazarlo por otro. No hay rotación online de ese secreto en el MVP. Los secretos por agente se cifran en SQLite con AES-256-GCM usando una clave externa.
 - Montar `/var/run/docker.sock` otorga capacidad equivalente a root sobre **ese host**. El contenedor del agente no se presenta como sandbox fuerte; el binario systemd con hardening es el camino recomendado.
 - La allow-list de Compose compara rutas reales después de resolver symlinks, evitando escapes simples fuera de los roots configurados.
+- Compose recupera los env-files declarados por sus labels y compara el hash de configuración resuelto con el desplegado antes de ejecutar. Si falta el hash, el contexto no coincide o un servicio del stack no tiene configuración desplegada verificable, se bloquea la actualización. Los cambios de configuración se despliegan por separado.
 - Los valores de entorno se usan para reconstrucción pero se redactan en dry-runs y logs.
 - El executor rechaza contratos destructivos o ambiguos conocidos (`--rm`, publish-all, links legacy y mounts no soportados) en vez de degradarlos silenciosamente.
 - La verificación posterior confirma estado `running`, no salud de aplicación. Healthchecks configurables y rollback por healthcheck son fase 2.
@@ -40,7 +42,7 @@ El control plane no monta ningún Docker socket. Cada agente es una frontera de 
 
 - SQLite WAL simplifica backup y operación de una instancia. El acceso está encapsulado, pero HA/múltiples writers requieren PostgreSQL.
 - Docker CLI evita acoplarse a versiones del SDK y reutiliza Compose v2. Todos los comandos se construyen como arrays, sin shell.
-- Registry v2 soporta Docker Hub y registries anónimos estándar. Credenciales privadas y helpers son fase 2.
-- SSE cubre logs unidireccionales con reconexión nativa; WebSocket no añade valor.
+- La comparación de digests de workloads admite Docker Hub y Registry v2 anónimo, respetando referencias fijadas por digest. La autenticación privada para esa comparación queda para fase 2; esto no cambia el login GHCR usado para instalar DockPulse.
+- SSE cubre el flujo unidireccional de eventos del MVP y permite reconexión nativa.
 - Los eventos terminales tienen reintentos acotados, pero no existe outbox durable: la reconciliación automática de jobs tras una caída prolongada queda para fase 2.
 - Las tablas `schedules` e `ignore_rules` están migradas para evolución, pero la ejecución automática se mantiene desactivada hasta incorporar ventanas de mantenimiento, healthchecks y rollback verificable. El MVP permite actualización manual auditada y opt-in.

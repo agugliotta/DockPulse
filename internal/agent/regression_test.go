@@ -56,7 +56,7 @@ func TestComposeStackValidatesEveryService(t *testing.T) {
 	dir := t.TempDir()
 	for _, labels := range []string{`{"io.dockpulse.manage":"false"}`, `{}`} {
 		in := inspectContainer{}
-		in.Config.Labels = map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "web", "com.docker.compose.project.working_dir": dir}
+		in.Config.Labels = map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "web", "com.docker.compose.project.working_dir": dir, "com.docker.compose.config-hash": "deployed"}
 		config := `{"services":{"web":{"image":"nginx"},"db":{"image":"postgres:16","labels":` + labels + `}}}`
 		u := Updater{AllowedComposeRoots: []string{dir}, Docker: runFunc(func(_ context.Context, args ...string) ([]byte, error) { return []byte(config), nil })}
 		if _, err := u.composePlan(t.Context(), in, "stack", nil); err == nil {
@@ -81,7 +81,7 @@ func TestServiceUpdateDoesNotRecreateDependencies(t *testing.T) {
 func TestComposeServiceValidatesItsCurrentConfiguration(t *testing.T) {
 	dir := t.TempDir()
 	in := inspectContainer{}
-	in.Config.Labels = map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "web", "com.docker.compose.project.working_dir": dir}
+	in.Config.Labels = map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "web", "com.docker.compose.project.working_dir": dir, "com.docker.compose.config-hash": "deployed"}
 	for _, tc := range []struct {
 		config  string
 		allowed bool
@@ -91,7 +91,12 @@ func TestComposeServiceValidatesItsCurrentConfiguration(t *testing.T) {
 		{`{"services":{"web":{"image":"postgres"}}}`, false},
 		{`{"services":{"other":{"image":"nginx"}}}`, false},
 	} {
-		u := Updater{AllowedComposeRoots: []string{dir}, Docker: runFunc(func(context.Context, ...string) ([]byte, error) { return []byte(tc.config), nil })}
+		u := Updater{AllowedComposeRoots: []string{dir}, Docker: runFunc(func(_ context.Context, args ...string) ([]byte, error) {
+			if strings.Contains(strings.Join(args, " "), "config --hash") {
+				return []byte(args[len(args)-1] + " deployed"), nil
+			}
+			return []byte(tc.config), nil
+		})}
 		_, err := u.composePlan(t.Context(), in, "service", nil)
 		if (err == nil) != tc.allowed {
 			t.Fatalf("config %s: %v", tc.config, err)
@@ -102,8 +107,11 @@ func TestComposeServiceValidatesItsCurrentConfiguration(t *testing.T) {
 func TestComposeServiceConfigTargetsProfiledService(t *testing.T) {
 	dir := t.TempDir()
 	in := inspectContainer{}
-	in.Config.Labels = map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "tool", "com.docker.compose.project.working_dir": dir}
+	in.Config.Labels = map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "tool", "com.docker.compose.project.working_dir": dir, "com.docker.compose.config-hash": "deployed"}
 	u := Updater{AllowedComposeRoots: []string{dir}, Docker: runFunc(func(_ context.Context, args ...string) ([]byte, error) {
+		if strings.HasSuffix(strings.Join(args, " "), "config --hash tool") {
+			return []byte("tool deployed"), nil
+		}
 		if !strings.HasSuffix(strings.Join(args, " "), "config --format json tool") {
 			t.Fatalf("profiled service was not explicitly selected: %v", args)
 		}

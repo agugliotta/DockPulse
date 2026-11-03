@@ -22,7 +22,7 @@ Si los private vulnerability reports no están habilitados, contacta al propieta
 
 - La UI y API humanas no tienen login ni RBAC integrado; deben quedar detrás de un reverse proxy autenticado o en una red confiable.
 - El Agent tiene control equivalente a root sobre el Docker daemon de su LXC. Debe desplegarse uno por frontera Docker y nunca exponer su puerto a Internet.
-- Los secretos de Agent son individuales. El bootstrap token y la clave de cifrado deben generarse, almacenarse fuera del repositorio y rotarse de forma coordinada.
+- Los secretos de Agent son individuales. Bootstrap permite crear identidades, pero no sustituir un secret individual existente. Guardar secretos fuera del repositorio. Coordinar la rotación de bootstrap; la encryption key y los agent secrets no tienen rotación online en el MVP (ver recuperación en la guía de operación).
 - Para descargar las imágenes privadas de GHCR se puede compartir un único token `read:packages` entre los LXCs del homelab. Este token no reemplaza los secrets HMAC individuales de los Agents y no debe conceder permisos de escritura.
 - El modo read-only debe permanecer activo hasta validar inventario, políticas, dry-run y conectividad.
 

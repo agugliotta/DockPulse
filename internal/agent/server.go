@@ -23,19 +23,21 @@ type Config struct {
 	HeartbeatInterval, InventoryInterval                           time.Duration
 }
 type localJob struct {
-	Job    domain.Job
-	Events []domain.Event
+	Job                domain.Job
+	Events             []domain.Event
+	ControlID, Request string
 }
 type Agent struct {
-	cfg       Config
-	discovery Discovery
-	updater   Updater
-	client    *http.Client
-	log       *slog.Logger
-	mu        sync.RWMutex
-	jobs      map[string]*localJob
-	inventory domain.Inventory
-	replay    *auth.ReplayGuard
+	cfg            Config
+	discovery      Discovery
+	updater        Updater
+	client         *http.Client
+	log            *slog.Logger
+	mu             sync.RWMutex
+	jobs           map[string]*localJob
+	activeMutation string
+	inventory      domain.Inventory
+	replay         *auth.ReplayGuard
 }
 
 const maxLocalJobs = 200
@@ -154,17 +156,14 @@ func (a *Agent) update(w http.ResponseWriter, r *http.Request, body []byte) {
 		agentProblem(w, 400, "control_job_id and container_id are required")
 		return
 	}
-	if _, err := a.updater.DryRun(r.Context(), req); err != nil {
+	id, fresh, err := a.admitMutation(req.ControlJobID, "update", req, func() error { _, err := a.updater.DryRun(r.Context(), req); return err })
+	if err != nil {
 		agentProblem(w, 409, err.Error())
 		return
 	}
-	id := store.ID("agentjob")
-	j := domain.Job{ID: id, Action: "update", Status: domain.StatusQueued, CreatedAt: time.Now()}
-	a.mu.Lock()
-	a.jobs[id] = &localJob{Job: j}
-	a.pruneJobsLocked()
-	a.mu.Unlock()
-	go a.execute(id, req)
+	if fresh {
+		go a.execute(id, req)
+	}
 	agentJSON(w, 202, domain.ActionResponse{JobID: id})
 }
 
@@ -186,21 +185,55 @@ func (a *Agent) selfUpdate(w http.ResponseWriter, r *http.Request, body []byte) 
 		agentProblem(w, 400, "control_job_id is required")
 		return
 	}
-	if _, err := a.updater.SelfUpdatePlan(req.TargetVersion); err != nil {
+	id, fresh, err := a.admitMutation(req.ControlJobID, "self-update", req, func() error { _, err := a.updater.SelfUpdatePlan(req.TargetVersion); return err })
+	if err != nil {
 		agentProblem(w, 409, err.Error())
 		return
 	}
-	id := store.ID("agentjob")
-	j := domain.Job{ID: id, Action: "self-update", Status: domain.StatusQueued, CreatedAt: time.Now()}
-	a.mu.Lock()
-	a.jobs[id] = &localJob{Job: j}
-	a.pruneJobsLocked()
-	a.mu.Unlock()
-	go a.executeSelfUpdate(id, req)
+	if fresh {
+		go a.executeSelfUpdate(id, req)
+	}
 	agentJSON(w, 202, domain.ActionResponse{JobID: id})
 }
 
+// Admission and validation share a lock so no executor can start between them.
+func (a *Agent) admitMutation(controlID, action string, request any, validate func() error) (string, bool, error) {
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		return "", false, err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for id, job := range a.jobs {
+		if job.ControlID == controlID {
+			if job.Job.Action != action || job.Request != string(encoded) {
+				return "", false, fmt.Errorf("control job ID already used for a different request")
+			}
+			return id, false, nil
+		}
+	}
+	if a.activeMutation != "" {
+		return "", false, fmt.Errorf("another mutation is active on this agent")
+	}
+	if err := validate(); err != nil {
+		return "", false, err
+	}
+	id := store.ID("agentjob")
+	a.jobs[id] = &localJob{Job: domain.Job{ID: id, Action: action, Status: domain.StatusQueued, CreatedAt: time.Now()}, ControlID: controlID, Request: string(encoded)}
+	a.activeMutation = id
+	a.pruneJobsLocked()
+	return id, true, nil
+}
+func (a *Agent) releaseMutation(id string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.activeMutation == id {
+		a.activeMutation = ""
+	}
+}
+
 func (a *Agent) execute(id string, req domain.ActionRequest) {
+	defer a.releaseMutation(id)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 	now := time.Now()
@@ -237,6 +270,7 @@ func (a *Agent) execute(id string, req domain.ActionRequest) {
 }
 
 func (a *Agent) executeSelfUpdate(id string, req domain.SelfUpdateRequest) {
+	defer a.releaseMutation(id)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 	now := time.Now()
@@ -309,6 +343,9 @@ func (a *Agent) pruneJobsLocked() {
 		var oldestID string
 		var oldest time.Time
 		for id, job := range a.jobs {
+			if id == a.activeMutation {
+				continue
+			}
 			if job.Job.Status != domain.StatusSucceeded && job.Job.Status != domain.StatusFailed {
 				continue
 			}

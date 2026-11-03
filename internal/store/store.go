@@ -5,6 +5,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/subtle"
 	"database/sql"
 	"embed"
 	"encoding/base64"
@@ -131,14 +132,35 @@ func (s *Store) decrypt(v []byte) ([]byte, error) {
 }
 
 func (s *Store) RegisterAgent(ctx context.Context, a domain.Agent, secret []byte) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var previous []byte
+	err = tx.QueryRowContext(ctx, "SELECT secret_cipher FROM agents WHERE id=?", a.ID).Scan(&previous)
+	if err == nil {
+		current, decryptErr := s.decrypt(previous)
+		if decryptErr != nil {
+			return decryptErr
+		}
+		if subtle.ConstantTimeCompare(current, secret) != 1 {
+			return errors.New("existing agent identity requires its current secret")
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
 	ciphertext, err := s.encrypt(secret)
 	if err != nil {
 		return err
 	}
 	now := ts(time.Now())
-	_, err = s.db.ExecContext(ctx, `INSERT INTO agents(id,name,base_url,secret_cipher,version,read_only,last_heartbeat,created_at) VALUES(?,?,?,?,?,?,?,?)
+	_, err = tx.ExecContext(ctx, `INSERT INTO agents(id,name,base_url,secret_cipher,version,read_only,last_heartbeat,created_at) VALUES(?,?,?,?,?,?,?,?)
 	 ON CONFLICT(id) DO UPDATE SET name=excluded.name,base_url=excluded.base_url,secret_cipher=excluded.secret_cipher,version=excluded.version,read_only=excluded.read_only`, a.ID, a.Name, strings.TrimRight(a.BaseURL, "/"), ciphertext, a.Version, a.ReadOnly, now, now)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) AgentSecret(ctx context.Context, id string) ([]byte, error) {
@@ -223,6 +245,10 @@ func (s *Store) UpsertInventory(ctx context.Context, inv domain.Inventory) error
 		return err
 	}
 	for _, c := range inv.Containers {
+		// Rollback candidates must never take the logical identity of the live workload.
+		if strings.HasSuffix(c.Name, ".dockpulse-backup") {
+			continue
+		}
 		labels, _ := json.Marshal(c.Labels)
 		if c.DockerID == "" || c.Name == "" {
 			return errors.New("inventory requires container name and Docker ID")
@@ -262,7 +288,7 @@ func (s *Store) UpsertInventory(ctx context.Context, inv domain.Inventory) error
 			return err
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM containers WHERE agent_id=? AND runtime_status='removed' AND NOT EXISTS (SELECT 1 FROM update_jobs WHERE update_jobs.container_id=containers.id)`, inv.AgentID); err != nil {
+	if _, err = tx.ExecContext(ctx, `DELETE FROM containers WHERE agent_id=? AND runtime_status='removed' AND ignored=0 AND protected=0 AND sensitive_updates_allowed IS NULL AND NOT EXISTS (SELECT 1 FROM update_jobs WHERE update_jobs.container_id=containers.id)`, inv.AgentID); err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, "UPDATE agents SET last_sync=? WHERE id=?", ts(inv.SyncedAt), inv.AgentID)

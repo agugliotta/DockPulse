@@ -26,7 +26,7 @@ func TestSensitivePolicyExecution(t *testing.T) {
 			in := inspectContainer{}
 			in.ID, in.Name = "db-id", "/database"
 			in.Config.Image = "postgres:17"
-			in.Config.Labels = map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "db", "com.docker.compose.project.working_dir": dir}
+			in.Config.Labels = map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "db", "com.docker.compose.project.working_dir": dir, "com.docker.compose.config-hash": "deployed"}
 			if tc.disabled {
 				in.Config.Labels["io.dockpulse.manage"] = "false"
 			}
@@ -38,6 +38,9 @@ func TestSensitivePolicyExecution(t *testing.T) {
 				}
 				if strings.Contains(strings.Join(args, " "), "config --format json") {
 					return []byte(`{"services":{"db":{"image":"postgres:17"}}}`), nil
+				}
+				if strings.Contains(strings.Join(args, " "), "config --hash") {
+					return []byte(args[len(args)-1] + " deployed"), nil
 				}
 				mutations++
 				return nil, nil
@@ -59,8 +62,17 @@ func TestSensitivePolicyExecution(t *testing.T) {
 func TestSensitivePolicyCannotAuthorizeOtherStackServices(t *testing.T) {
 	dir := t.TempDir()
 	in := inspectContainer{}
-	in.Config.Labels = map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "db", "com.docker.compose.project.working_dir": dir}
-	u := Updater{AllowedComposeRoots: []string{dir}, Docker: runFunc(func(context.Context, ...string) ([]byte, error) {
+	in.Config.Labels = map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "db", "com.docker.compose.project.working_dir": dir, "com.docker.compose.config-hash": "deployed"}
+	u := Updater{AllowedComposeRoots: []string{dir}, Docker: runFunc(func(_ context.Context, args ...string) ([]byte, error) {
+		if args[0] == "ps" {
+			return []byte("db cache"), nil
+		}
+		if args[0] == "inspect" {
+			return []byte(`[{"Config":{"Labels":{"com.docker.compose.service":"db","com.docker.compose.config-hash":"deployed"}}},{"Config":{"Labels":{"com.docker.compose.service":"cache","com.docker.compose.config-hash":"deployed"}}}]`), nil
+		}
+		if strings.Contains(strings.Join(args, " "), "config --hash") {
+			return []byte(args[len(args)-1] + " deployed"), nil
+		}
 		return []byte(`{"services":{"db":{"image":"postgres:17"},"cache":{"image":"redis:8"}}}`), nil
 	})}
 	if _, err := u.composePlan(t.Context(), in, "stack", map[string]bool{"db": true}); err == nil {

@@ -136,6 +136,12 @@ func TestDockerIntegrationProfiledService(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := domain.ActionRequest{ContainerID: original.ID, Scope: "service", Confirm: true}
+	if _, err := u.DryRun(t.Context(), req); err == nil {
+		t.Fatal("changed Compose configuration was accepted")
+	}
+	if err := os.WriteFile(file, []byte(fmt.Sprintf(config, "600")), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := u.DryRun(t.Context(), req); err != nil {
 		t.Fatal(err)
 	}
@@ -143,8 +149,8 @@ func TestDockerIntegrationProfiledService(t *testing.T) {
 		t.Fatal(err)
 	}
 	after, err := u.inspect(t.Context(), project+"-tool-1")
-	if err != nil || after.ID == original.ID || after.State.Status != "running" {
-		t.Fatalf("profiled service was not recreated: %s %v", after.ID, err)
+	if err != nil || after.State.Status != "running" {
+		t.Fatalf("profiled service did not remain running: %s %v", after.ID, err)
 	}
 	untouched, err := u.inspect(t.Context(), project+"-web-1")
 	if err != nil || untouched.ID != sibling.ID || untouched.State.Status != "running" {

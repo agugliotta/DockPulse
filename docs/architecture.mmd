@@ -25,6 +25,6 @@ flowchart TB
         Agent2 -->|"socket local"| Docker2 --> Workloads2
     end
 
-    Operator -->|"HTTPS"| Web
+    Operator -->|"HTTPS + auth externa"| Web
     Control <-->|"API HMAC: inventario, eventos y acciones"| Agent1
     Control <-->|"API HMAC: inventario, eventos y acciones"| Agent2

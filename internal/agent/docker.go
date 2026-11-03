@@ -147,6 +147,9 @@ func (d Discovery) Inventory(ctx context.Context, agentID string, checkUpdates b
 		err    error
 	})
 	for _, in := range inspected {
+		if strings.HasSuffix(in.Name, ".dockpulse-backup") {
+			continue
+		}
 		c := toContainer(agentID, in, d.AllowedComposeRoots)
 		imgRaw, e := d.Docker.Run(ctx, "image", "inspect", in.Image)
 		if e == nil {

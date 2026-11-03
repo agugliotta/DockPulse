@@ -1,6 +1,6 @@
 # Uso, operación y troubleshooting
 
-Esta guía describe el comportamiento operativo del MVP. Las reglas críticas se aplican en el control plane y vuelven a validarse en el agente inmediatamente antes de tocar Docker.
+Esta guía describe el comportamiento operativo del MVP. El control valida las políticas centrales al despachar; el agente vuelve a inspeccionar el contrato y las guardas locales antes de tocar Docker. Una política cambiada después de la aceptación afecta nuevas solicitudes.
 
 ## Rutina recomendada
 
@@ -62,6 +62,7 @@ El agente consulta `Docker-Content-Digest` del manifest asociado a la referencia
 - `update_available=true` exige digest local y remoto conocidos y distintos.
 - Sin `RepoDigest` local, sin header remoto o con error de registry, DockPulse no afirma que exista un update.
 - Registries privados con autenticación no forman parte del MVP.
+- Una referencia fijada por digest se consulta por ese digest, no por `latest`. DockPulse no busca una versión posterior a un pin inmutable.
 - Un cambio de digest puede incluir una reconstrucción del mismo tag; revisar release notes de la imagen fuera de DockPulse.
 
 ## Versiones y self-update
@@ -126,7 +127,7 @@ Las labels de un contenedor existente no se cambian en caliente de forma fiable;
 
 ### Ignore y protect
 
-Desde la UI se pueden aplicar por contenedor. En Compose, ignore/protect de stack actualiza todos los contenedores conocidos del mismo `agent_id + compose_project`. Una sincronización posterior conserva esas políticas aunque Docker recree el contenedor con otro ID.
+Desde la UI se pueden aplicar por contenedor. En Compose, ignore/protect de stack actualiza todos los contenedores conocidos del mismo `agent_id + compose_project`. Una sincronización posterior conserva esas políticas aunque Docker recree el contenedor con otro ID o falte temporalmente del inventario. Las decisiones que ya se perdieron antes de esta corrección deben revisarse y restablecerse explícitamente; no pueden inferirse de un inventario nuevo. El sufijo `.dockpulse-backup` queda reservado para candidatos de rollback; esos contenedores no se incorporan al inventario ni reciben la identidad del servicio.
 
 ### Autorizar servicios con datos desde el manager
 
@@ -176,7 +177,9 @@ docker compose --project-directory <dir> -p <project> pull <service>
 docker compose --project-directory <dir> -p <project> up -d --no-deps <service>
 ```
 
-Para scope `stack`, omite el servicio y reconcilia el proyecto completo después de validar sus políticas. El scope `service` no inicia ni recrea dependencias. DockPulse no genera un rollback Compose automático; ante fallo, revisar `docker compose ps`, logs y el archivo Compose antes de intervenir.
+Para scope `stack`, omite el servicio y reconcilia el proyecto completo después de validar sus políticas. El scope `service` no inicia ni recrea dependencias; afecta todas las réplicas del servicio y exige que ninguna esté bloqueada.
+
+El agente recupera los env-files de `com.docker.compose.project.environment_file` cuando están disponibles. Antes de cada ejecución compara `docker compose --profile '*' config --hash <servicio>` con `com.docker.compose.config-hash` de los servicios desplegados. Un hash ausente o distinto bloquea la operación, incluso si el archivo es válido. Esto detecta env-files perdidos, variables externas no reconstruidas y cambios de configuración. Restaurar los archivos y el contexto originales o desplegar intencionalmente los cambios con Compose fuera de DockPulse, y después refrescar inventario. El update de stack exige configuración desplegada verificable para cada servicio; no incorpora servicios nuevos sin ese contrato. DockPulse no genera un rollback Compose automático; ante fallo, revisar `docker compose ps`, logs y el archivo Compose antes de intervenir.
 
 ## Jobs, locks y auditoría
 
@@ -187,7 +190,7 @@ Cada acción crea un job con:
 - action, timestamps y resultado;
 - correlation ID y eventos estructurados.
 
-Solo puede existir un job `queued` o `running` por contenedor standalone. Todos los scopes Compose usan un lock por proyecto, para impedir que un stack y uno de sus servicios se actualicen simultáneamente. Un fallo de dispatch deja el job en `failed` y libera el lock.
+Solo puede existir un job `queued` o `running` por contenedor standalone. Todos los scopes Compose usan un lock por proyecto, para impedir que un stack y uno de sus servicios se actualicen simultáneamente. Un rechazo explícito 4xx del agente deja el job en `failed` y libera el lock. Un timeout, una respuesta inválida o un error 5xx dejan la aceptación incierta: el job conserva su lock y registra una advertencia hasta verificar el resultado. El agente solo acepta una mutación a la vez, incluido self-update. Repetir el mismo `control_job_id` y solicitud devuelve el job ya admitido sin volver a ejecutarlo mientras siga en su historial local (hasta 200 registros; no persiste tras reiniciar).
 
 El agente reintenta la entrega del estado terminal, pero no hay outbox durable ni reconciliación automática en el MVP. Si el control estuvo caído durante todo el final de una operación, el job puede quedar activo aunque Docker haya terminado. Antes de tocar la base:
 
@@ -197,6 +200,15 @@ El agente reintenta la entrega del estado terminal, pero no hay outbox durable n
 4. solo entonces reconciliar el job offline o restaurar el backup.
 
 No existe un endpoint administrativo de force-unlock en el MVP. No cambiar un job a `failed` sin verificar primero que no haya una ejecución activa.
+
+## Interrupción durante la recreación
+
+El rollback de `docker run` solo se intenta mientras el proceso del agente sigue vivo. No hay journal durable ni recuperación automática al arrancar. Una caída del agente o del host tras detener/renombrar el original puede dejar el servicio apagado y el original bajo `<nombre>.dockpulse-backup`.
+
+1. Detener nuevas mutaciones y verificar que ningún executor siga activo; self-update no debe usarse como recuperación.
+2. Inspeccionar por ID el original, el candidato `.dockpulse-backup` y cualquier reemplazo. Revisar imagen, mounts y datos; no eliminar ni renombrar contenedores solo por el sufijo.
+3. Tras respaldar los datos y elegir el contenedor correcto, detener/retirar el reemplazo fallido únicamente si se identificó con certeza, devolver el nombre original al candidato y arrancarlo con Docker. Si el original aún conserva su nombre, no hace falta renombrarlo.
+4. Verificar la aplicación, refrescar inventario y reconciliar el job offline siguiendo la sección de locks. Si no se puede identificar el original, conservar ambos y recuperar desde el backup de aplicación.
 
 ## API de control plane
 
@@ -336,4 +348,4 @@ La base vive en el volumen `dockpulse-data` y usa WAL. Para un backup consistent
 
 Con Proxmox, un snapshot/backup consistente del volumen o LXC con el control detenido es la opción preferida. Probar restauraciones periódicamente en una instancia aislada y arrancar inicialmente con agentes read-only.
 
-La encryption key no tiene rotación online en el MVP. No reemplazarla sobre una base existente. Para rotar un agent secret, cambiarlo en el agente y reiniciarlo con un bootstrap token válido; el registro actualiza el secreto cifrado. La rotación del bootstrap debe coordinarse en el control y en **todos** los agentes, porque lo reutilizan al volver a registrarse tras una pérdida de conectividad.
+La encryption key no tiene rotación online en el MVP. No reemplazarla sobre una base existente. Re-registrar un Agent exige conservar su secreto actual: bootstrap no autoriza sustituir el secreto de otra identidad. No hay rotación online de agent secrets en este MVP. Cambiar solo la variable del agente provoca rechazo del registro; restaurar el secreto conocido. Una recuperación offline o alta de una identidad nueva debe preservar explícitamente el historial y las políticas del agente anterior; no borrar una identidad con jobs para eludir esta guarda. La rotación del bootstrap debe coordinarse en el control y en **todos** los agentes, porque lo reutilizan al volver a registrarse tras una pérdida de conectividad.
