@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { allowsSensitiveUpdates, type Container } from '$lib/api';
-  import Status from '$lib/Status.svelte';
+  import { allowsSensitiveUpdates, type Container } from '#lib/api.ts';
+  import Status from '#lib/Status.svelte';
   let { container: c }: { container: Container } = $props();
 </script>
 

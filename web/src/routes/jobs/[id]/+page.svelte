@@ -9,8 +9,8 @@
     since,
     type Job,
     type JobEvent
-  } from '$lib/api';
-  import Status from '$lib/Status.svelte';
+  } from '#lib/api.ts';
+  import Status from '#lib/Status.svelte';
   let job = $state<Job | null>(null);
   let events = $state<JobEvent[]>([]);
   let error = $state('');

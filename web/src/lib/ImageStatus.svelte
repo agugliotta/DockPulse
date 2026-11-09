@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { Container } from '$lib/api';
-  import Status from '$lib/Status.svelte';
+  import type { Container } from '#lib/api.ts';
+  import Status from '#lib/Status.svelte';
   let { container }: { container: Container } = $props();
   const known = $derived(Boolean(container.current_digest && container.remote_digest));
 </script>

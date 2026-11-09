@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { api, since, type Job, type SystemInfo } from '$lib/api';
-  import Status from '$lib/Status.svelte';
-  import { compareVersions, releaseStatus } from '$lib/releases';
+  import { api, since, type Job, type SystemInfo } from '#lib/api.ts';
+  import Status from '#lib/Status.svelte';
+  import { compareVersions, releaseStatus } from '#lib/releases.ts';
 
   let system = $state<SystemInfo | null>(null);
   let loading = $state(true);

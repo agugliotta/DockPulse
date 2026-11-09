@@ -9,9 +9,9 @@
     type Agent,
     type Container,
     type Job
-  } from '$lib/api';
-  import Status from '$lib/Status.svelte';
-  import PolicyStatus from '$lib/PolicyStatus.svelte';
+  } from '#lib/api.ts';
+  import Status from '#lib/Status.svelte';
+  import PolicyStatus from '#lib/PolicyStatus.svelte';
   let agents = $state<Agent[]>([]);
   let containers = $state<Container[]>([]);
   let jobs = $state<Job[]>([]);
