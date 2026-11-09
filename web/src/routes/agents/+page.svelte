@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, since, type Agent, type Container } from '$lib/api';
-  import Status from '$lib/Status.svelte';
+  import { api, since, type Agent, type Container } from '#lib/api.ts';
+  import Status from '#lib/Status.svelte';
   let agents = $state<Agent[]>([]);
   let containers = $state<Container[]>([]);
   let loading = $state(true);

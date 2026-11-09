@@ -1,10 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { page } from '$app/state';
-  import { api, since, type Agent, type Container } from '$lib/api';
-  import Status from '$lib/Status.svelte';
-  import PolicyStatus from '$lib/PolicyStatus.svelte';
-  import ImageStatus from '$lib/ImageStatus.svelte';
+  import { api, since, type Agent, type Container } from '#lib/api.ts';
+  import Status from '#lib/Status.svelte';
+  import PolicyStatus from '#lib/PolicyStatus.svelte';
+  import ImageStatus from '#lib/ImageStatus.svelte';
   let agent = $state<Agent | null>(null);
   let containers = $state<Container[]>([]);
   let loading = $state(true);

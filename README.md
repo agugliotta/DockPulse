@@ -129,7 +129,7 @@ docker run -d --name whoami \
 
 ## Desarrollo y pruebas
 
-El código requiere Go 1.25 o superior. El frontend requiere Node.js 22.
+El código requiere Go 1.26 o superior. El frontend requiere Node.js 22.17 o superior.
 
 ```bash
 GOCACHE="$PWD/.cache/go-build" GOMODCACHE="$PWD/.cache/go-mod" go test ./...

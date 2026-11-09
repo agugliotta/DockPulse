@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, imageVersion, short, allowsSensitiveUpdates, type Container } from '$lib/api';
-  import Status from '$lib/Status.svelte';
-  import PolicyStatus from '$lib/PolicyStatus.svelte';
-  import ImageStatus from '$lib/ImageStatus.svelte';
+  import { api, imageVersion, short, allowsSensitiveUpdates, type Container } from '#lib/api.ts';
+  import Status from '#lib/Status.svelte';
+  import PolicyStatus from '#lib/PolicyStatus.svelte';
+  import ImageStatus from '#lib/ImageStatus.svelte';
   let containers = $state<Container[]>([]);
   let query = $state('');
   let filter = $state('all');

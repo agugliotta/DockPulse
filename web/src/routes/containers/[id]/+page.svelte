@@ -2,10 +2,10 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
-  import { api, parsePlan, since, type Container, type Job, type UpdatePreflight } from '$lib/api';
-  import Status from '$lib/Status.svelte';
-  import ImageStatus from '$lib/ImageStatus.svelte';
-  import { allowsSensitiveUpdates } from '$lib/api';
+  import { api, parsePlan, since, type Container, type Job, type UpdatePreflight } from '#lib/api.ts';
+  import Status from '#lib/Status.svelte';
+  import ImageStatus from '#lib/ImageStatus.svelte';
+  import { allowsSensitiveUpdates } from '#lib/api.ts';
   let item = $state<Container | null>(null);
   let preflight = $state<UpdatePreflight | null>(null);
   let loading = $state(true);

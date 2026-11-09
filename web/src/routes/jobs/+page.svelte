@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, jobActionDescription, jobActionLabel, since, type Job } from '$lib/api';
-  import Status from '$lib/Status.svelte';
+  import { api, jobActionDescription, jobActionLabel, since, type Job } from '#lib/api.ts';
+  import Status from '#lib/Status.svelte';
   let jobs = $state<Job[]>([]);
   let loading = $state(true);
   let error = $state('');
